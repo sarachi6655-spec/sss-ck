@@ -107,15 +107,19 @@ class HtmlDocumentCodec {
         final String rowspanAttr = (rowspan != null && rowspan.isNotEmpty) ? ' rowspan="$rowspan"' : '';
         final String cellStyle = cell.metadata['style'] as String? ?? '';
         final String cellClass = cell.metadata['class'] as String? ?? '';
+        final String? formula = cell.metadata['data-formula'] as String?;
+        final String? title = cell.metadata['title'] as String?;
         final String cStyleAttr = cellStyle.isNotEmpty ? ' style="$cellStyle"' : '';
         final String cClassAttr = cellClass.isNotEmpty ? ' class="$cellClass"' : '';
+        final String formulaAttr = (formula != null && formula.isNotEmpty) ? ' data-formula="$formula"' : '';
+        final String titleAttr = (title != null && title.isNotEmpty) ? ' title="$title"' : '';
 
         final String cellHtml = cell.metadata['html'] as String? ?? '';
         final String cellContent = cellHtml.isNotEmpty
             ? cellHtml
             : (cell.text.isNotEmpty ? _escapeHtml(cell.text) : '&nbsp;');
 
-        buffer.write('        <$tag$colspanAttr$rowspanAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
+        buffer.write('        <$tag$colspanAttr$rowspanAttr$formulaAttr$titleAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
       }
       buffer.write('      </tr>\n');
     }
@@ -389,6 +393,8 @@ class HtmlDocumentCodec {
         final String? rowspan = cell.attributes['rowspan'];
         final String? cellStyle = cell.attributes['style'];
         final String? cellClass = cell.attributes['class'];
+        final String? cellFormula = cell.attributes['data-formula'];
+        final String? cellTitle = cell.attributes['title'];
 
         cellNodes.add(EditorNode(
           id: 'cell_${r}_$c',
@@ -401,6 +407,8 @@ class HtmlDocumentCodec {
             if (rowspan != null && rowspan.isNotEmpty) 'rowspan': rowspan,
             if (cellStyle != null && cellStyle.isNotEmpty) 'style': cellStyle,
             if (cellClass != null && cellClass.isNotEmpty) 'class': cellClass,
+            if (cellFormula != null && cellFormula.isNotEmpty) 'data-formula': cellFormula,
+            if (cellTitle != null && cellTitle.isNotEmpty) 'title': cellTitle,
           },
         ));
       }
