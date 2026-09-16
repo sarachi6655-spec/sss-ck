@@ -145,7 +145,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="format-detection" content="telephone=no">
   <title>CKEditor 5 — Full Featured</title>
   <!-- CKEditor 5 Super Build loaded dynamically in body script -->
   <!-- jsPDF for Export to PDF -->
@@ -163,15 +166,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     /* ====== RESET & BASE ====== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%; height: 100%; overflow: hidden;
+      width: 100%; height: 100%; height: 100dvh; overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
       font-size: 14px;
       background: #ffffff; color: #1e293b;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
       transition: background 0.2s, color 0.2s;
     }
     /* ====== MAIN LAYOUT ====== */
     #app-container {
-      display: flex; flex-direction: column; width: 100%; height: 100%;
+      display: flex; flex-direction: column; width: 100%; height: 100%; height: 100dvh;
+      position: relative; overflow: hidden;
     }
     #app-container.fullscreen-mode {
       position: fixed !important;
@@ -179,6 +185,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       left: 0 !important;
       width: 100vw !important;
       height: 100vh !important;
+      height: 100dvh !important;
       z-index: 2147483647 !important;
       background: #ffffff !important;
     }
@@ -192,6 +199,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       flex-shrink: 0; flex-wrap: nowrap; min-height: 40px;
       overflow-x: auto; white-space: nowrap;
       -webkit-overflow-scrolling: touch;
+      touch-action: pan-x;
       scrollbar-width: none;
       overscroll-behavior-x: contain;
     }
@@ -204,6 +212,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       white-space: nowrap;
       display: inline-flex; align-items: center; gap: 4px;
       user-select: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
     #action-bar button:hover { background: #e2e8f0; border-color: #94a3b8; }
     #action-bar button:active { transform: scale(0.97); }
@@ -489,8 +499,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .template-card .template-desc { font-size: 11px; color: #64748b; margin-top: 4px; }
 
     /* ====== MATH FORMULA MODAL ====== */
-    .math-input { width: 100%; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: monospace; font-size: 14px; margin-bottom: 12px; }
-    .math-preview { padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; min-height: 60px; text-align: center; margin-bottom: 12px; }
+    .math-input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-family: monospace; font-size: 14px; margin-bottom: 12px; }
+    .math-preview { padding: 16px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; min-height: 60px; text-align: center; margin-bottom: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; box-sizing: border-box; }
     .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
     .modal-actions button { padding: 8px 16px; border-radius: 6px; border: 1px solid #cbd5e1; cursor: pointer; font-size: 13px; }
     .modal-actions .primary-btn { background: #3b82f6; color: white; border-color: #3b82f6; }
@@ -672,46 +682,29 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     body.dark #table-color-modal h2 { color: #cdd6f4; }
     body.dark #table-color-modal label { color: #cdd6f4 !important; }
 
-    /* ====== RESPONSIVE BREAKPOINTS (TABLET & MOBILE) ====== */
+    /* ====== RESPONSIVE BREAKPOINTS (TABLET, MOBILE, FOLDABLES, DESKTOP) ====== */
+    /* 1. TABLET LANDSCAPE & COMPACT LAPTOPS (<= 1024px) */
     @media (max-width: 1024px) {
-      .ck-content { padding: 18px 24px !important; }
+      .ck-content { padding: 16px 20px !important; }
       #side-panel.open { width: 280px; }
+      .ck.ck-dropdown__panel { max-width: min(88vw, 340px) !important; }
     }
 
+    /* 2. TABLET PORTRAIT & UNFOLDED FOLDABLES (<= 768px) */
     @media (max-width: 768px) {
-      .ck-content { padding: 14px 18px !important; font-size: 14.5px !important; }
+      .ck-content { padding: 12px 16px !important; font-size: 14.5px !important; }
       #side-panel.open { width: 300px; }
-      .modal-box { width: 92% !important; padding: 18px !important; }
+      .modal-box { width: 92% !important; padding: 18px !important; max-height: 88dvh !important; }
+      .ck.ck-balloon-panel { max-width: 92vw !important; }
     }
 
-    /* Ensure dropdowns and popovers never overflow on mobile / foldables */
-    .ck.ck-dropdown__panel {
-      max-width: 92vw !important;
-      overflow-x: hidden !important;
-    }
-    .ck.ck-balloon-panel {
-      max-width: 95vw !important;
-    }
-
-    @media (max-width: 420px) {
-      .ck-content { padding: 8px 10px !important; font-size: 13.5px !important; line-height: 1.5 !important; }
-      #action-bar { padding: 3px 4px !important; min-height: 32px !important; gap: 3px !important; }
-      #action-bar button, #action-bar select { padding: 3px 6px !important; font-size: 10.5px !important; border-radius: 4px !important; }
-      .ck.ck-toolbar { padding: 1px 2px !important; }
-      .ck.ck-button { min-width: 28px !important; min-height: 28px !important; padding: 2px !important; }
-      .ck.ck-dropdown__panel { max-width: 88vw !important; }
-      #status-bar { padding: 2px 6px !important; font-size: 10px !important; }
-      #status-bar .status-section:last-child { display: none !important; }
-      .modal-box { width: 98% !important; padding: 10px !important; max-height: 92vh !important; }
-      .template-grid { grid-template-columns: 1fr !important; }
-    }
-
+    /* 3. PHABLETS, LARGE PHONES & SPLIT SCREEN (<= 600px) */
     @media (max-width: 600px) {
       .ck-content { padding: 10px 12px !important; font-size: 14px !important; line-height: 1.6 !important; }
       .ck.ck-toolbar { padding: 2px 4px !important; }
       .ck.ck-button { min-width: 30px !important; min-height: 30px !important; padding: 3px !important; }
-      #action-bar { padding: 4px 6px; min-height: 36px; gap: 4px; }
-      #action-bar button, #action-bar select { padding: 4px 8px; font-size: 11px; }
+      #action-bar { padding: 4px 6px !important; min-height: 36px !important; gap: 4px !important; }
+      #action-bar button, #action-bar select { padding: 4px 8px !important; font-size: 11px !important; }
 
       /* Mobile full-screen slide-in drawer for side panel */
       #side-panel.open {
@@ -724,18 +717,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         z-index: 10000 !important;
         box-shadow: none !important;
       }
-      #side-panel-header {
-        padding: 14px 16px;
-      }
-      #side-panel-header button {
-        padding: 6px 12px;
-        font-size: 20px;
-      }
+      #side-panel-header { padding: 12px 14px; }
+      #side-panel-header button { padding: 6px 12px; font-size: 20px; }
 
       /* Modal sizing on mobile */
       .modal-box {
-        width: 96% !important;
-        max-height: 88vh !important;
+        width: 95% !important;
+        max-height: 90dvh !important;
         padding: 14px 12px !important;
         border-radius: 10px !important;
       }
@@ -747,8 +735,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       /* Status bar responsive wrap */
       #status-bar {
         flex-wrap: wrap !important;
-        gap: 4px 10px !important;
-        padding: 4px 8px !important;
+        gap: 4px 8px !important;
+        padding: 3px 8px !important;
         font-size: 11px !important;
         min-height: auto !important;
       }
@@ -757,12 +745,71 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
 
       /* Table responsive horizontal scroll */
-      .ck-content figure.table {
-        margin: 12px 0 !important;
+      .ck-content figure.table,
+      .ck-content .table,
+      .ck-content table {
+        margin: 10px 0 !important;
         max-width: 100% !important;
         overflow-x: auto !important;
         -webkit-overflow-scrolling: touch !important;
+        display: block !important;
       }
+    }
+
+    /* 4. STANDARD SMARTPHONES (<= 420px: iPhone, Galaxy, Pixel) */
+    @media (max-width: 420px) {
+      .ck-content { padding: 8px 10px !important; font-size: 13.5px !important; line-height: 1.5 !important; }
+      #action-bar { padding: 3px 4px !important; min-height: 32px !important; gap: 3px !important; }
+      #action-bar button, #action-bar select { padding: 3px 6px !important; font-size: 10.5px !important; border-radius: 4px !important; }
+      .ck.ck-toolbar { padding: 1px 2px !important; }
+      .ck.ck-button { min-width: 28px !important; min-height: 28px !important; padding: 2px !important; }
+      .ck.ck-dropdown__panel { max-width: 94vw !important; }
+      .ck.ck-balloon-panel { max-width: 96vw !important; }
+      #status-bar { padding: 2px 6px !important; font-size: 10px !important; }
+      #status-bar .status-section:last-child { display: none !important; }
+      .modal-box { width: 97% !important; padding: 10px 10px !important; max-height: 92dvh !important; }
+      .template-grid { grid-template-columns: 1fr !important; }
+      
+      /* Table styling modal on small phones */
+      .color-swatch-grid {
+        grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)) !important;
+        gap: 4px !important;
+      }
+      .color-swatch { height: 28px !important; }
+      .tbl-target-btn { padding: 4px 8px !important; font-size: 11px !important; }
+    }
+
+    /* 5. ULTRA-NARROW FOLDABLE COVER SCREENS (<= 340px: Galaxy Z Fold closed, mini displays) */
+    @media (max-width: 340px) {
+      .ck-content { padding: 6px 6px !important; font-size: 12.5px !important; line-height: 1.45 !important; }
+      #action-bar { padding: 2px 3px !important; min-height: 30px !important; gap: 2px !important; }
+      #action-bar button, #action-bar select { padding: 2px 5px !important; font-size: 9.5px !important; border-radius: 3px !important; }
+      .ck.ck-toolbar { padding: 1px 1px !important; }
+      .ck.ck-button { min-width: 26px !important; min-height: 26px !important; padding: 1px !important; }
+      .ck.ck-dropdown__panel { max-width: 96vw !important; }
+      .ck.ck-balloon-panel { max-width: 98vw !important; }
+      #status-bar { padding: 2px 4px !important; font-size: 9.5px !important; }
+      #status-bar .status-section:last-child { display: none !important; }
+      .modal-box { width: 98% !important; padding: 8px 8px !important; max-height: 94dvh !important; border-radius: 8px !important; }
+      .modal-box h2 { font-size: 14px !important; margin-bottom: 6px !important; }
+      .color-swatch-grid {
+        grid-template-columns: repeat(auto-fill, minmax(28px, 1fr)) !important;
+        gap: 3px !important;
+      }
+      .color-swatch { height: 24px !important; }
+      .tbl-target-btn { padding: 3px 6px !important; font-size: 10px !important; }
+      .math-input { padding: 6px !important; font-size: 12px !important; }
+      .math-preview { min-height: 40px !important; padding: 8px !important; }
+    }
+
+    /* 6. SHORT VIEWPORTS / MOBILE LANDSCAPE (height <= 500px) */
+    @media (max-height: 500px) {
+      #action-bar { min-height: 30px !important; padding: 2px 6px !important; }
+      #action-bar button, #action-bar select { padding: 2px 6px !important; font-size: 10.5px !important; }
+      .ck.ck-toolbar { padding: 1px 4px !important; }
+      .ck.ck-button { min-width: 26px !important; min-height: 26px !important; }
+      #status-bar { min-height: 20px !important; padding: 1px 6px !important; font-size: 10px !important; }
+      .modal-box { max-height: 96dvh !important; padding: 10px !important; }
     }
 
     /* ====== PRINT STYLES ====== */
