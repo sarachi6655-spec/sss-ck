@@ -49,14 +49,19 @@ class DocumentValue {
   /// Convenience method for plain text extraction.
   String toPlainText() => plainText;
 
+  static final RegExp _htmlTagRegExp = RegExp(r'<[^>]*>');
+
   static String _extractText(EditorNode node) {
+    String raw = '';
     if (node.text.isNotEmpty) {
-      return node.text;
+      raw = node.text;
+    } else if (node.children.isNotEmpty) {
+      raw = node.children.map(_extractText).join('\t');
     }
-    if (node.children.isNotEmpty) {
-      return node.children.map(_extractText).join('\t');
+    if (raw.contains('<') && raw.contains('>')) {
+      return raw.replaceAll(_htmlTagRegExp, '');
     }
-    return '';
+    return raw;
   }
 
   bool get isEmpty =>
