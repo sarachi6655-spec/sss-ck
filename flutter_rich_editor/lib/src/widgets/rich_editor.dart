@@ -83,7 +83,7 @@ class _RichEditorState extends State<RichEditor> {
   Widget build(BuildContext context) {
     if (kIsWeb) {
       return CKEditorWebView(
-        key: const ValueKey<String>('ckeditor_web_view'),
+        key: widget.key ?? ValueKey<int>(widget.controller.hashCode),
         initialHtml: widget.controller.toHtml(),
         isDark: widget.theme.isDark,
         placeholder: widget.config.placeholder,

@@ -74,7 +74,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       iframe.style.border = 'none';
       iframe.style.width = '100%';
       iframe.style.height = '100%';
-      iframe.setAttribute('allow', 'clipboard-read; clipboard-write');
+      iframe.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+      iframe.setAttribute('allowfullscreen', 'true');
       iframe.srcdoc = _generateHtmlTemplate().toJS;
       _iframe = iframe;
       return iframe;

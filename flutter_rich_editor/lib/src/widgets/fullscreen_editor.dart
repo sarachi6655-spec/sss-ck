@@ -41,13 +41,15 @@ class FullscreenEditor extends StatelessWidget {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: RichEditor(
-            controller: controller,
-            theme: theme,
-            config: config,
-            toolbarConfig: toolbarConfig,
+        child: SizedBox.expand(
+          child: Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: RichEditor(
+              controller: controller,
+              theme: theme,
+              config: config,
+              toolbarConfig: toolbarConfig,
+            ),
           ),
         ),
       ),
