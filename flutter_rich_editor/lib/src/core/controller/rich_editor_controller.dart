@@ -55,6 +55,7 @@ class RichEditorController extends ChangeNotifier {
 
   DocumentValue _document;
   DocumentValue _lastValidDocument = DocumentValue.empty();
+  String? _rawHtml;
   bool _isDisposed = false;
 
   final CommandBus _commandBus;
@@ -126,6 +127,7 @@ class RichEditorController extends ChangeNotifier {
     _checkNotDisposed();
     final CommandResult result = _commandBus.execute(command, _document);
     if (result.success) {
+      _rawHtml = null;
       _document = result.document;
       _lastValidDocument = _document;
       notifyListeners();
@@ -138,6 +140,7 @@ class RichEditorController extends ChangeNotifier {
     _checkNotDisposed();
     final CommandResult? result = _commandBus.undo(_document);
     if (result != null && result.success) {
+      _rawHtml = null;
       _document = result.document;
       _lastValidDocument = _document;
       notifyListeners();
@@ -150,6 +153,7 @@ class RichEditorController extends ChangeNotifier {
     _checkNotDisposed();
     final CommandResult? result = _commandBus.redo(_document);
     if (result != null && result.success) {
+      _rawHtml = null;
       _document = result.document;
       _lastValidDocument = _document;
       notifyListeners();
@@ -173,12 +177,14 @@ class RichEditorController extends ChangeNotifier {
 
   /// Clears the document content to an empty state.
   void clear() {
+    _rawHtml = '';
     import(DocumentValue.empty());
   }
 
   /// Updates document state directly during active typing without flooding undo history.
   void updateDocumentDirect(DocumentValue newDoc, {bool notify = true}) {
     _checkNotDisposed();
+    _rawHtml = null;
     _document = newDoc;
     _lastValidDocument = newDoc;
     if (notify) {
@@ -216,11 +222,15 @@ class RichEditorController extends ChangeNotifier {
     _checkNotDisposed();
     final DocumentValue decoded = _htmlCodec.decode(html);
     import(decoded);
+    _rawHtml = html;
   }
 
   /// Exports the current document as semantic HTML.
   String toHtml() {
     _checkNotDisposed();
+    if (_rawHtml != null) {
+      return _rawHtml!;
+    }
     return _htmlCodec.encode(_document);
   }
 

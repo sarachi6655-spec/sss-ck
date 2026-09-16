@@ -72,21 +72,58 @@ class HtmlDocumentCodec {
 
   String _encodeTable(EditorNode tableNode) {
     final StringBuffer buffer = StringBuffer();
-    buffer.write('<table>\n');
+    final bool wrapInFigure = tableNode.metadata['wrapInFigure'] != false;
+    final String figClass = tableNode.metadata['figureClass'] as String? ?? 'table';
+    final String figStyle = tableNode.metadata['figureStyle'] as String? ?? '';
+
+    if (wrapInFigure) {
+      final String styleAttr = figStyle.isNotEmpty ? ' style="$figStyle"' : '';
+      buffer.write('<figure class="$figClass"$styleAttr>\n');
+    }
+
+    final String tableClass = tableNode.metadata['class'] as String? ?? '';
+    final String tableStyle = tableNode.metadata['style'] as String? ?? '';
+    final String classAttr = tableClass.isNotEmpty ? ' class="$tableClass"' : '';
+    final String styleAttr = tableStyle.isNotEmpty ? ' style="$tableStyle"' : '';
+
+    buffer.write('  <table$classAttr$styleAttr>\n');
     final String caption = tableNode.metadata['caption'] as String? ?? '';
     if (caption.isNotEmpty) {
-      buffer.write('  <caption>$caption</caption>\n');
+      buffer.write('    <caption>$caption</caption>\n');
     }
+    buffer.write('    <tbody>\n');
     for (final EditorNode row in tableNode.children) {
-      buffer.write('  <tr>\n');
+      final String rowStyle = row.metadata['style'] as String? ?? '';
+      final String rowClass = row.metadata['class'] as String? ?? '';
+      final String rStyleAttr = rowStyle.isNotEmpty ? ' style="$rowStyle"' : '';
+      final String rClassAttr = rowClass.isNotEmpty ? ' class="$rowClass"' : '';
+      buffer.write('      <tr$rClassAttr$rStyleAttr>\n');
       for (final EditorNode cell in row.children) {
         final bool isHeader = cell.metadata['isHeader'] == true;
         final String tag = isHeader ? 'th' : 'td';
-        buffer.write('    <$tag>${cell.text}</$tag>\n');
+        final String? colspan = cell.metadata['colspan']?.toString();
+        final String? rowspan = cell.metadata['rowspan']?.toString();
+        final String colspanAttr = (colspan != null && colspan.isNotEmpty) ? ' colspan="$colspan"' : '';
+        final String rowspanAttr = (rowspan != null && rowspan.isNotEmpty) ? ' rowspan="$rowspan"' : '';
+        final String cellStyle = cell.metadata['style'] as String? ?? '';
+        final String cellClass = cell.metadata['class'] as String? ?? '';
+        final String cStyleAttr = cellStyle.isNotEmpty ? ' style="$cellStyle"' : '';
+        final String cClassAttr = cellClass.isNotEmpty ? ' class="$cellClass"' : '';
+
+        final String cellHtml = cell.metadata['html'] as String? ?? '';
+        final String cellContent = cellHtml.isNotEmpty
+            ? cellHtml
+            : (cell.text.isNotEmpty ? _escapeHtml(cell.text) : '&nbsp;');
+
+        buffer.write('        <$tag$colspanAttr$rowspanAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
       }
-      buffer.write('  </tr>\n');
+      buffer.write('      </tr>\n');
     }
-    buffer.write('</table>\n');
+    buffer.write('    </tbody>\n');
+    buffer.write('  </table>\n');
+    if (wrapInFigure) {
+      buffer.write('</figure>\n');
+    }
     return buffer.toString();
   }
 
@@ -274,51 +311,15 @@ class HtmlDocumentCodec {
         break;
 
       case 'table':
-        final String caption = element.querySelector('caption')?.text.trim() ?? '';
-        final List<EditorNode> rowNodes = <EditorNode>[];
-        final List<dom.Element> trElements = element.querySelectorAll('tr');
-        int colCount = 0;
-
-        for (int r = 0; r < trElements.length; r++) {
-          final dom.Element tr = trElements[r];
-          final List<EditorNode> cellNodes = <EditorNode>[];
-          final List<dom.Element> cells = tr.querySelectorAll('th, td');
-          if (cells.length > colCount) {
-            colCount = cells.length;
-          }
-
-          for (int c = 0; c < cells.length; c++) {
-            final dom.Element cell = cells[c];
-            cellNodes.add(EditorNode(
-              id: 'cell_${r}_$c',
-              type: 'table_cell',
-              text: cell.text.trim(),
-              metadata: <String, dynamic>{
-                'isHeader': cell.localName == 'th',
-              },
-            ));
-          }
-
-          rowNodes.add(EditorNode(
-            id: 'row_$r',
-            type: 'table_row',
-            children: cellNodes,
-          ));
-        }
-
-        nodes.add(EditorNode(
-          id: 'table_${nextId()}',
-          type: 'table',
-          metadata: <String, dynamic>{
-            'rows': rowNodes.length,
-            'columns': colCount,
-            'caption': caption,
-          },
-          children: rowNodes,
-        ));
+        _parseTable(element, nodes, nextId);
         break;
 
       case 'figure':
+        final dom.Element? table = element.querySelector('table');
+        if (table != null) {
+          _parseTable(table, nodes, nextId, figureElement: element);
+          break;
+        }
         final dom.Element? img = element.querySelector('img');
         final String cap = element.querySelector('figcaption')?.text.trim() ?? '';
         if (img != null) {
@@ -358,6 +359,85 @@ class HtmlDocumentCodec {
         ));
         break;
     }
+  }
+
+  void _parseTable(
+    dom.Element tableElement,
+    List<EditorNode> nodes,
+    int Function() nextId, {
+    dom.Element? figureElement,
+  }) {
+    final String caption = tableElement.querySelector('caption')?.text.trim() ?? '';
+    final List<EditorNode> rowNodes = <EditorNode>[];
+    final List<dom.Element> trElements = tableElement.querySelectorAll('tr');
+    int colCount = 0;
+
+    for (int r = 0; r < trElements.length; r++) {
+      final dom.Element tr = trElements[r];
+      final List<EditorNode> cellNodes = <EditorNode>[];
+      final List<dom.Element> cells = tr.querySelectorAll('th, td');
+      if (cells.length > colCount) {
+        colCount = cells.length;
+      }
+
+      for (int c = 0; c < cells.length; c++) {
+        final dom.Element cell = cells[c];
+        final bool isHeader = cell.localName == 'th';
+        final String innerHtml = cell.innerHtml.trim();
+        final String cellText = cell.text.trim();
+        final String? colspan = cell.attributes['colspan'];
+        final String? rowspan = cell.attributes['rowspan'];
+        final String? cellStyle = cell.attributes['style'];
+        final String? cellClass = cell.attributes['class'];
+
+        cellNodes.add(EditorNode(
+          id: 'cell_${r}_$c',
+          type: 'table_cell',
+          text: cellText,
+          metadata: <String, dynamic>{
+            'isHeader': isHeader,
+            'html': innerHtml.isNotEmpty ? innerHtml : cellText,
+            if (colspan != null && colspan.isNotEmpty) 'colspan': colspan,
+            if (rowspan != null && rowspan.isNotEmpty) 'rowspan': rowspan,
+            if (cellStyle != null && cellStyle.isNotEmpty) 'style': cellStyle,
+            if (cellClass != null && cellClass.isNotEmpty) 'class': cellClass,
+          },
+        ));
+      }
+
+      final String? rowStyle = tr.attributes['style'];
+      final String? rowClass = tr.attributes['class'];
+      rowNodes.add(EditorNode(
+        id: 'row_$r',
+        type: 'table_row',
+        metadata: <String, dynamic>{
+          if (rowStyle != null && rowStyle.isNotEmpty) 'style': rowStyle,
+          if (rowClass != null && rowClass.isNotEmpty) 'class': rowClass,
+        },
+        children: cellNodes,
+      ));
+    }
+
+    final String? tableStyle = tableElement.attributes['style'];
+    final String? tableClass = tableElement.attributes['class'];
+    final String? figStyle = figureElement?.attributes['style'];
+    final String? figClass = figureElement?.attributes['class'];
+
+    nodes.add(EditorNode(
+      id: 'table_${nextId()}',
+      type: 'table',
+      metadata: <String, dynamic>{
+        'rows': rowNodes.length,
+        'columns': colCount,
+        'caption': caption,
+        'wrapInFigure': figureElement != null,
+        if (figStyle != null && figStyle.isNotEmpty) 'figureStyle': figStyle,
+        if (figClass != null && figClass.isNotEmpty) 'figureClass': figClass,
+        if (tableStyle != null && tableStyle.isNotEmpty) 'style': tableStyle,
+        if (tableClass != null && tableClass.isNotEmpty) 'class': tableClass,
+      },
+      children: rowNodes,
+    ));
   }
 
   Map<String, dynamic> _extractAttributes(dom.Element element) {

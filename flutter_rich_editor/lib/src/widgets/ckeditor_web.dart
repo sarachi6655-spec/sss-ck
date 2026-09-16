@@ -2045,9 +2045,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function setEditorData(html) {
-      if (editorInstance) editorInstance.setData(html);
-      else if (isFallback) document.getElementById('fallback-content').innerHTML = html;
-      postToFlutter({ type: 'ckeditor_change', html: html });
+      if (editorInstance) {
+        editorInstance.setData(html);
+      } else if (isFallback) {
+        document.getElementById('fallback-content').innerHTML = html;
+        postToFlutter({ type: 'ckeditor_change', html: html });
+      }
     }
 
     function getTextPreview(html, maxLen) {
