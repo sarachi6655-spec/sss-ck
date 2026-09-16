@@ -1,61 +1,91 @@
-# Flutter Rich Editor (`flutter_rich_editor` / `sss_rich_editor`)
+# Flutter Rich Editor (`flutter_rich_editor`)
 
-A high-performance, fully configurable rich text editor for Flutter with complete CKEditor 5 feature parity, dynamic color theming, and an extensible plugin architecture.
-
----
-
-## Features
-
-- **CKEditor 5 Feature Parity**:
-  - **Formatting**: Bold, italic, underline, strikethrough, inline code, subscript, superscript, colors, background highlights, clear formatting.
-  - **Structure**: Headings (H1–H6), blockquotes, horizontal rules, bullet lists, numbered lists, to-do lists with checkbox interaction, list indent & outdent.
-  - **Media & Tables**: Resizable images, native video playback and upload progress, external media embeds (with strict host security policy), links, and full tables with rows, columns, merged cells, and column resizing.
-  - **Code & Diagrams**: Code blocks with syntax highlighting and editable fallback, plus sanitized Mermaid diagram rendering.
-  - **Interoperability & Serialization**: Lossless canonical JSON tree codec, semantic HTML import/export with comment preservation, GitHub Flavored Markdown import/export, and Quill Delta migration support.
-  - **Security & Paste**: Sanitized HTML paste with Word/Google Docs cleanup and undoable insertions.
-  - **Collaboration & Reviewer Mode**: Comments, reviewer-restricted editing, track changes suggestions (accept/reject), and conflict-free collaboration transport contracts.
-  - **Dynamic Theming**: 50+ theme tokens controlling every visual surface, border, background, typography, icon, and state without hardcoded colors.
-  - **Enterprise Reliability**: Built-in `WatchdogBoundary` ensuring error recovery without data loss.
+A production-ready, highly configurable WYSIWYG rich text editor for Flutter with complete **CKEditor 5** feature parity on Web, native fallback for mobile/desktop, dynamic color theming, and an extensible architecture.
 
 ---
 
-## Getting Started
+## Key Features
 
-Add the private package as a path dependency in your Flutter app's `pubspec.yaml`:
+- **⚡ 100% Automatic Table Formulas**:
+  - Live calculations on keystroke: `=SUM(A1:A2)`, `=AVG(A1:A5)`, `=MIN(...)`, `=MAX(...)`, `=COUNT(...)`, `=A1*B1`, `=SUM(ABOVE)`.
+  - Automatic chained formula recalculation across dependent cells.
+  - Interactive formula documentation modal with formula helper syntax.
+- **🎨 Advanced Table Styling & Colorizer**:
+  - Color target selection: Individual Cell, Entire Column, Entire Row, Header Row, Zebra Stripes, or Entire Table.
+  - Soft pastels & corporate color presets + custom HEX background & text color picker.
+  - Table manipulation: insert/delete rows/columns, resize columns, merge/split cells.
+- **🎬 Media Embed & Video Resizing**:
+  - Direct video attachments: YouTube, Vimeo, MP4 URLs, and uploads.
+  - On-click floating video toolbar: 25%, 50%, 75%, 100% width presets + smooth slider + alignment controls (Left, Center, Right).
+- **🔤 Comprehensive Typography & Fonts**:
+  - Extended font family dropdown: Calibri, Aptos, Segoe UI, Arial, Georgia, Roboto, Times New Roman, Courier New, etc.
+  - Custom font sizes (9px – 36px), text colors, background highlights, and line spacing.
+- **🧹 Paste Normalization ("Harmonize")**:
+  - Seamlessly cleanses pasted content from Word, Excel, and Google Docs.
+  - One-click "Harmonize" normalizes mismatched font families, font sizes, and external table borders to match your document's primary style.
+- **📱 Responsive & Mobile-Friendly**:
+  - Overflow-protected action bar with horizontal touch-scrolling.
+  - Mobile & tablet optimized dropdowns and modals.
+- **📄 Document Exporting & Utilities**:
+  - One-click PDF export, Word (.docx) export, and Print preview.
+  - Fullscreen editor mode and HTML source code viewer.
+- **Dynamic Theming**:
+  - 50+ theme tokens controlling every visual surface, background, and toolbar state.
+
+---
+
+## Installation
+
+### Method 1: Git Dependency (Recommended)
+Add to your project's `pubspec.yaml`:
 
 ```yaml
 dependencies:
+  flutter:
+    sdk: flutter
   flutter_rich_editor:
-    path: flutter_rich_editor
+    git:
+      url: https://github.com/sarachi6655-spec/sss-ck.git
+      path: flutter_rich_editor
+      ref: main
 ```
 
-### Basic Usage
+### Method 2: Local Path Dependency (Fastest for local development)
+```yaml
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_rich_editor:
+    path: ../sss-ck/flutter_rich_editor # Adjust relative or absolute path
+```
+
+Then run:
+```bash
+flutter pub get
+```
+
+---
+
+## Quick Start (3 Minutes)
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter_rich_editor/flutter_rich_editor.dart';
 
-class MyEditorPage extends StatefulWidget {
-  const MyEditorPage({super.key});
+class MyEditorScreen extends StatefulWidget {
+  const MyEditorScreen({super.key});
 
   @override
-  State<MyEditorPage> createState() => _MyEditorPageState();
+  State<MyEditorScreen> createState() => _MyEditorScreenState();
 }
 
-class _MyEditorPageState extends State<MyEditorPage> {
+class _MyEditorScreenState extends State<MyEditorScreen> {
   late final RichEditorController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = RichEditorController(
-      initialDocument: DocumentValue(
-        nodes: [
-          EditorNode.heading(id: 'h1', text: 'Welcome to the Editor', level: 1),
-          EditorNode.paragraph(id: 'p1', text: 'Start writing your rich document here...'),
-        ],
-      ),
-    );
+    _controller = RichEditorController();
   }
 
   @override
@@ -64,15 +94,27 @@ class _MyEditorPageState extends State<MyEditorPage> {
     super.dispose();
   }
 
+  void _saveDocument() {
+    final String htmlContent = _controller.toHtml();
+    final String markdownContent = _controller.toMarkdown();
+    print('HTML Output: $htmlContent');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Rich Editor')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      appBar: AppBar(
+        title: const Text('My Rich Document'),
+        actions: [
+          IconButton(icon: const Icon(Icons.save), onPressed: _saveDocument),
+        ],
+      ),
+      body: SafeArea(
         child: RichEditor(
           controller: _controller,
-          theme: EditorTheme.light(),
+          config: const EditorConfig(
+            placeholder: 'Start typing here...',
+          ),
         ),
       ),
     );
@@ -82,66 +124,67 @@ class _MyEditorPageState extends State<MyEditorPage> {
 
 ---
 
+## Controller API Reference
+
+### Exporting Content
+```dart
+// Semantic HTML (CKEditor 5 compliant)
+final String html = _controller.toHtml();
+
+// GitHub Flavored Markdown
+final String markdown = _controller.toMarkdown();
+
+// Lossless canonical JSON tree
+final String jsonTree = _controller.toJson();
+```
+
+### Importing / Setting Content
+```dart
+// Load from HTML
+_controller.loadHtml('<h2>Title</h2><p>Hello <strong>World</strong>!</p>');
+
+// Load from Markdown
+_controller.loadMarkdown('# Title\n\nSample content with **bold** text.');
+
+// Clear content
+_controller.clear();
+```
+
+### Listening to Changes
+```dart
+_controller.addListener(() {
+  // Triggered whenever the user edits text, modifies a table, or changes styling
+  print('Document updated');
+});
+```
+
+---
+
 ## Dynamic Theming
 
-Every color, font, spacing, and radius is completely customizable:
+You can customize all editor visual tokens:
 
 ```dart
 RichEditor(
   controller: _controller,
   theme: EditorTheme(
-    backgroundColor: const Color(0xFF1E1E2E),
-    textColor: const Color(0xFFCDD6F4),
-    cursorColor: const Color(0xFFF5C2E7),
-    selectionColor: const Color(0x4089B4FA),
-    toolbarBackgroundColor: const Color(0xFF313244),
-    toolbarBorderColor: const Color(0xFF45475A),
-    toolbarItemColor: const Color(0xFFBAC2DE),
-    toolbarItemActiveColor: const Color(0xFF89B4FA),
-    toolbarItemActiveBackgroundColor: const Color(0xFF45475A),
-    codeBlockBackgroundColor: const Color(0xFF181825),
-    tableBorderColor: const Color(0xFF45475A),
-    tableHeaderBackgroundColor: const Color(0xFF313244),
-    blockquoteBorderColor: const Color(0xFF6C7086),
-    blockquoteBackgroundColor: const Color(0xFF181825),
+    backgroundColor: const Color(0xFFF8FAFC),
+    textColor: const Color(0xFF0F172A),
+    toolbarBackgroundColor: const Color(0xFFFFFFFF),
+    toolbarBorderColor: const Color(0xFFE2E8F0),
+    toolbarItemColor: const Color(0xFF334155),
+    toolbarItemActiveColor: const Color(0xFF2563EB),
+    cursorColor: const Color(0xFF2563EB),
   ),
 );
 ```
 
 ---
 
-## HTML & Markdown Import / Export
+## Platform Support
 
-```dart
-// Export to HTML
-final String html = _controller.toHtml();
-
-// Load from HTML
-_controller.loadHtml('<h1>Report</h1><p>Sample <strong>bold</strong> text.</p>');
-
-// Export to Markdown
-final String markdown = _controller.toMarkdown();
-
-// Load from Markdown
-_controller.loadMarkdown('# Title\n\n- [ ] Task 1\n- [x] Task 2');
-```
-
----
-
-## Migration from Flutter Quill
-
-Migrating from `flutter_quill` is straightforward using the built-in `DeltaDocumentCodec`:
-
-```dart
-import 'package:flutter_rich_editor/flutter_rich_editor.dart';
-
-final List<dynamic> quillDeltaOps = [
-  {'insert': 'Hello '},
-  {'insert': 'World', 'attributes': {'bold': true}},
-  {'insert': '\n'},
-];
-
-// Decode Delta to DocumentValue
-final DocumentValue doc = const DeltaDocumentCodec().decode(quillDeltaOps);
-_controller.import(doc);
-```
+| Platform | Engine | Capabilities |
+|---|---|---|
+| **Web** | CKEditor 5 | Complete feature parity (table formulas, video resize, table colorizer, Calibri fonts, export) |
+| **Android / iOS** | Native Flutter Canvas | Core formatting, headers, lists, code blocks |
+| **macOS / Windows / Linux** | Native Flutter Canvas | Core formatting, headers, lists, code blocks |

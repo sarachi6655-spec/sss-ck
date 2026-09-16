@@ -1,0 +1,18 @@
+# Flutter / Dart build artifacts
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Logs and scratch files
+*.log
+flutter_*.log
+scratch/
