@@ -684,6 +684,28 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       .modal-box { width: 92% !important; padding: 18px !important; }
     }
 
+    /* Ensure dropdowns and popovers never overflow on mobile / foldables */
+    .ck.ck-dropdown__panel {
+      max-width: 92vw !important;
+      overflow-x: hidden !important;
+    }
+    .ck.ck-balloon-panel {
+      max-width: 95vw !important;
+    }
+
+    @media (max-width: 420px) {
+      .ck-content { padding: 8px 10px !important; font-size: 13.5px !important; line-height: 1.5 !important; }
+      #action-bar { padding: 3px 4px !important; min-height: 32px !important; gap: 3px !important; }
+      #action-bar button, #action-bar select { padding: 3px 6px !important; font-size: 10.5px !important; border-radius: 4px !important; }
+      .ck.ck-toolbar { padding: 1px 2px !important; }
+      .ck.ck-button { min-width: 28px !important; min-height: 28px !important; padding: 2px !important; }
+      .ck.ck-dropdown__panel { max-width: 88vw !important; }
+      #status-bar { padding: 2px 6px !important; font-size: 10px !important; }
+      #status-bar .status-section:last-child { display: none !important; }
+      .modal-box { width: 98% !important; padding: 10px !important; max-height: 92vh !important; }
+      .template-grid { grid-template-columns: 1fr !important; }
+    }
+
     @media (max-width: 600px) {
       .ck-content { padding: 10px 12px !important; font-size: 14px !important; line-height: 1.6 !important; }
       .ck.ck-toolbar { padding: 2px 4px !important; }
