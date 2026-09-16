@@ -1,252 +1,249 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-
-import '../command_bus/command_bus.dart';
-import '../document_model/document_model.dart';
-import '../plugin_system/plugin_system.dart';
+import '../../serialization/html_codec.dart';
 import '../../serialization/json_codec.dart';
+import '../../serialization/markdown_codec.dart';
+import '../command_bus/command_bus.dart';
+import '../document_model/document_value.dart';
+import '../document_model/editor_selection.dart';
+import '../plugin_system/plugin.dart';
+import '../plugin_system/plugin_preset.dart';
+import '../plugin_system/plugin_registry.dart';
 
-/// Public controller for the rich editor.
-///
-/// This is the primary API surface for host applications. It wraps the command
-/// bus, document model, selection, focus, and serialization adapters.
-class RichEditorController extends ChangeNotifier {
-  final PluginRegistry _registry;
-  final CommandBus _commandBus;
-  final ValueNotifier<DocumentValue> _document;
-  final ValueNotifier<EditorSelection> _selection;
-  final FocusNode focusNode;
-  final bool readOnly;
-  final void Function(EditorCommandException error)? onError;
-  final StreamController<EditorChangeEvent> _changeController =
-      StreamController<EditorChangeEvent>.broadcast();
+/// Command used to replace the current document with a newly loaded document state.
+class LoadDocumentCommand extends EditorCommand {
+  const LoadDocumentCommand({
+    required this.newDocument,
+  });
 
-  DocumentValue _lastValidDocument;
-  bool _disposed = false;
+  final DocumentValue newDocument;
 
-  RichEditorController({
-    required PluginRegistry registry,
-    DocumentValue? initialDocument,
-    EditorSelection? initialSelection,
-    this.readOnly = false,
-    this.onError,
-    FocusNode? focusNode,
-  })  : _registry = registry,
-        _document = ValueNotifier<DocumentValue>(
-            initialDocument ?? DocumentValue.empty),
-        _selection = ValueNotifier<EditorSelection>(
-            initialSelection ?? const EditorSelection.none()),
-        focusNode = focusNode ?? FocusNode(),
-        _lastValidDocument = initialDocument ?? DocumentValue.empty,
-        _commandBus = CommandBus(
-          registry: registry,
-          document: ValueNotifier<DocumentValue>(
-              initialDocument ?? DocumentValue.empty),
-          selection: ValueNotifier<EditorSelection>(
-              initialSelection ?? const EditorSelection.none()),
-          readOnly: readOnly,
-          onError: onError,
-        ) {
-    _document.addListener(_onDocumentChanged);
-    _selection.addListener(_onSelectionChanged);
+  @override
+  String get id => 'core.loadDocument';
+
+  @override
+  CommandResult execute(DocumentValue document) {
+    return CommandResult.ok(newDocument);
   }
 
-  /// Current document value.
-  DocumentValue get document => _document.value;
+  @override
+  CommandResult undo(DocumentValue document, DocumentValue previousSnapshot) {
+    return CommandResult.ok(previousSnapshot);
+  }
+}
 
-  /// Current selection.
-  EditorSelection get selection => _selection.value;
+/// Primary controller managing document state, selection, commands, and codec imports/exports.
+class RichEditorController extends ChangeNotifier {
+  RichEditorController({
+    DocumentValue? initialDocument,
+    PluginPreset preset = const PluginPreset.full(),
+    List<EditorPlugin> plugins = const <EditorPlugin>[],
+    CommandBus? commandBus,
+  })  : _document = initialDocument ?? DocumentValue.empty(),
+        _commandBus = commandBus ?? CommandBus() {
+    _lastValidDocument = _document;
+    _pluginRegistry = PluginRegistry(commandBus: _commandBus);
 
-  /// Stream of document/selection change events.
-  Stream<EditorChangeEvent> get changes => _changeController.stream;
+    // Register preset or custom plugins
+    final List<EditorPlugin> activePlugins = <EditorPlugin>[
+      ...preset.customPlugins,
+      ...plugins,
+    ];
+    if (activePlugins.isNotEmpty) {
+      _pluginRegistry.registerPlugins(activePlugins);
+    }
+  }
 
-  /// Whether undo is available.
-  bool get canUndo => _commandBus.canUndo;
+  DocumentValue _document;
+  DocumentValue _lastValidDocument = DocumentValue.empty();
+  bool _isDisposed = false;
 
-  /// Whether redo is available.
-  bool get canRedo => _commandBus.canRedo;
+  final CommandBus _commandBus;
+  late final PluginRegistry _pluginRegistry;
 
-  /// Last valid document snapshot. Updated after every successful mutation and
-  /// used by the watchdog boundary for recovery.
+  final JsonDocumentCodec _jsonCodec = const JsonDocumentCodec();
+  final HtmlDocumentCodec _htmlCodec = const HtmlDocumentCodec();
+  final MarkdownDocumentCodec _markdownCodec = const MarkdownDocumentCodec();
+
+  /// Current document snapshot.
+  DocumentValue get document {
+    _checkNotDisposed();
+    return _document;
+  }
+
+  /// The last successfully committed document (used by watchdog recovery).
   DocumentValue get lastValidDocument => _lastValidDocument;
 
-  /// Execute a command by registered id.
-  EditorCommandResult executeCommand(
-    String commandId, {
-    Map<String, dynamic> arguments = const <String, dynamic>{},
-  }) {
-    _assertNotDisposed();
-    final EditorCommandResult result = _commandBus.executeCommand(
-      commandId,
-      arguments: arguments,
-    );
-    _syncFromBus();
-    return result;
+  /// Current active selection.
+  EditorSelection get selection {
+    _checkNotDisposed();
+    return _document.selection;
   }
 
-  /// Execute an arbitrary command instance.
-  EditorCommandResult execute(EditorCommand command) {
-    _assertNotDisposed();
-    final EditorCommandResult result = _commandBus.execute(command);
-    _syncFromBus();
-    return result;
+  /// The underlying command bus.
+  CommandBus get commandBus {
+    _checkNotDisposed();
+    return _commandBus;
   }
 
-  /// Undo the last command.
-  EditorCommandResult undo() {
-    _assertNotDisposed();
-    final EditorCommandResult result = _commandBus.undo();
-    _syncFromBus();
-    return result;
+  /// The active plugin registry.
+  PluginRegistry get pluginRegistry {
+    _checkNotDisposed();
+    return _pluginRegistry;
   }
 
-  /// Redo the last undone command.
-  EditorCommandResult redo() {
-    _assertNotDisposed();
-    final EditorCommandResult result = _commandBus.redo();
-    _syncFromBus();
-    return result;
+  /// Whether the controller has been disposed.
+  bool get isDisposed => _isDisposed;
+
+  /// Whether an undo operation is available.
+  bool get canUndo {
+    _checkNotDisposed();
+    return _commandBus.canUndo;
   }
 
-  /// Select all content.
-  void selectAll() {
-    _assertNotDisposed();
-    if (_document.value.nodes.isEmpty) {
-      return;
+  /// Whether a redo operation is available.
+  bool get canRedo {
+    _checkNotDisposed();
+    return _commandBus.canRedo;
+  }
+
+  void _checkNotDisposed() {
+    if (_isDisposed) {
+      throw StateError('Cannot use RichEditorController after it has been disposed.');
     }
-    final EditorNode first = _document.value.nodes.first;
-    final EditorNode last = _document.value.nodes.last;
-    _selection.value = EditorSelection.range(
-      nodeId: first.id,
-      startOffset: 0,
-      endOffset: last.plainText.length,
-    );
-    notifyListeners();
   }
 
-  /// Update selection directly.
-  void updateSelection(EditorSelection selection) {
-    _assertNotDisposed();
-    _selection.value = selection;
-    notifyListeners();
-  }
-
-  /// Load a document from canonical JSON.
-  void loadJson(Map<String, dynamic> json) {
-    _assertNotDisposed();
-    final DocumentValue value = JsonCodec.decode(json, _registry);
-    _document.value = value;
-    _lastValidDocument = value;
-    _selection.value = const EditorSelection.none();
-    _commandBus.clearHistory();
-    notifyListeners();
-  }
-
-  /// Export the current document to canonical JSON.
-  Map<String, dynamic> toJson() {
-    _assertNotDisposed();
-    return JsonCodec.encode(_document.value, _registry);
-  }
-
-  /// Import from HTML, Markdown, or Delta using the registered codecs.
-  void import(String format, String data) {
-    _assertNotDisposed();
-    // Delegated to serialization adapters registered by plugins.
-    _document.value = ImportedDocumentResolver.resolve(format, data, _registry);
-    _lastValidDocument = _document.value;
-    _commandBus.clearHistory();
-    notifyListeners();
-  }
-
-  /// Export to the requested format.
-  String export(String format) {
-    _assertNotDisposed();
-    return ExportedDocumentResolver.resolve(format, _document.value, _registry);
-  }
-
-  void _onDocumentChanged() {
-    if (_document.value != _lastValidDocument) {
-      _lastValidDocument = _document.value;
-      _changeController.add(EditorChangeEvent.document(_document.value));
+  /// Updates the selection without modifying document content.
+  void setSelection(EditorSelection newSelection) {
+    _checkNotDisposed();
+    if (_document.selection != newSelection) {
+      _document = _document.copyWith(selection: newSelection);
       notifyListeners();
     }
   }
 
-  void _onSelectionChanged() {
-    _changeController.add(EditorChangeEvent.selection(_selection.value));
-    notifyListeners();
-  }
-
-  void _syncFromBus() {
-    _document.value = _commandBus.document;
-    _selection.value = _commandBus.selection;
-  }
-
-  void _assertNotDisposed() {
-    if (_disposed) {
-      throw StateError('RichEditorController has been disposed.');
+  /// Dispatches a command through the command bus.
+  CommandResult execute(EditorCommand command) {
+    _checkNotDisposed();
+    final CommandResult result = _commandBus.execute(command, _document);
+    if (result.success) {
+      _document = result.document;
+      _lastValidDocument = _document;
+      notifyListeners();
     }
+    return result;
+  }
+
+  /// Undoes the last mutation.
+  CommandResult? undo() {
+    _checkNotDisposed();
+    final CommandResult? result = _commandBus.undo(_document);
+    if (result != null && result.success) {
+      _document = result.document;
+      _lastValidDocument = _document;
+      notifyListeners();
+    }
+    return result;
+  }
+
+  /// Redoes the last undone mutation.
+  CommandResult? redo() {
+    _checkNotDisposed();
+    final CommandResult? result = _commandBus.redo(_document);
+    if (result != null && result.success) {
+      _document = result.document;
+      _lastValidDocument = _document;
+      notifyListeners();
+    }
+    return result;
+  }
+
+  /// Selects all text across all nodes.
+  void selectAll() {
+    _checkNotDisposed();
+    if (_document.nodes.isEmpty) return;
+    final int lastNodeIndex = _document.nodes.length - 1;
+    final int lastNodeLength = _document.nodes[lastNodeIndex].text.length;
+    setSelection(EditorSelection(
+      baseOffset: 0,
+      extentOffset: lastNodeLength,
+      nodeIndex: 0,
+      endNodeIndex: lastNodeIndex,
+    ));
+  }
+
+  /// Clears the document content to an empty state.
+  void clear() {
+    import(DocumentValue.empty());
+  }
+
+  /// Updates document state directly during active typing without flooding undo history.
+  void updateDocumentDirect(DocumentValue newDoc, {bool notify = true}) {
+    _checkNotDisposed();
+    _document = newDoc;
+    _lastValidDocument = newDoc;
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  /// Imports a [DocumentValue] through the command bus to ensure undoability.
+  void import(DocumentValue doc) {
+    _checkNotDisposed();
+    execute(LoadDocumentCommand(newDocument: doc));
+  }
+
+  /// Exports the current document snapshot.
+  DocumentValue export() {
+    _checkNotDisposed();
+    return _document;
+  }
+
+  /// Loads canonical JSON content.
+  void loadJson(Map<String, dynamic> json) {
+    _checkNotDisposed();
+    final DocumentValue decoded = _jsonCodec.decodeFromMap(json);
+    import(decoded);
+  }
+
+  /// Exports the current document as canonical JSON.
+  Map<String, dynamic> toJson() {
+    _checkNotDisposed();
+    return _jsonCodec.encodeToMap(_document);
+  }
+
+  /// Loads HTML content.
+  void loadHtml(String html) {
+    _checkNotDisposed();
+    final DocumentValue decoded = _htmlCodec.decode(html);
+    import(decoded);
+  }
+
+  /// Exports the current document as semantic HTML.
+  String toHtml() {
+    _checkNotDisposed();
+    return _htmlCodec.encode(_document);
+  }
+
+  /// Loads Markdown content.
+  void loadMarkdown(String markdown) {
+    _checkNotDisposed();
+    final DocumentValue decoded = _markdownCodec.decode(markdown);
+    import(decoded);
+  }
+
+  /// Exports the current document as GitHub Flavored Markdown.
+  String toMarkdown() {
+    _checkNotDisposed();
+    return _markdownCodec.encode(_document);
   }
 
   @override
   void dispose() {
-    if (_disposed) {
-      return;
+    if (!_isDisposed) {
+      _isDisposed = true;
+      _pluginRegistry.dispose();
+      _commandBus.dispose();
+      super.dispose();
     }
-    _disposed = true;
-    _document.removeListener(_onDocumentChanged);
-    _selection.removeListener(_onSelectionChanged);
-    _registry.dispose();
-    _changeController.close();
-    focusNode.dispose();
-    super.dispose();
-  }
-}
-
-/// Change event emitted by [RichEditorController.changes].
-@immutable
-class EditorChangeEvent {
-  final EditorChangeType type;
-  final dynamic payload;
-
-  const EditorChangeEvent._(this.type, this.payload);
-
-  factory EditorChangeEvent.document(DocumentValue document) =>
-      EditorChangeEvent._(EditorChangeType.document, document);
-
-  factory EditorChangeEvent.selection(EditorSelection selection) =>
-      EditorChangeEvent._(EditorChangeType.selection, selection);
-
-  DocumentValue? get document =>
-      type == EditorChangeType.document ? payload as DocumentValue : null;
-
-  EditorSelection? get selection =>
-      type == EditorChangeType.selection ? payload as EditorSelection : null;
-}
-
-enum EditorChangeType { document, selection }
-
-/// Placeholder resolver for imports. Real implementations live in the
-/// serialization layer.
-class ImportedDocumentResolver {
-  static DocumentValue resolve(
-    String format,
-    String data,
-    PluginRegistry registry,
-  ) {
-    // Default to a single paragraph containing the raw data when no codec is
-    // available. This is safe but lossy; real codecs override this.
-    return DocumentValue(nodes: <EditorNode>[]);
-  }
-}
-
-/// Placeholder resolver for exports. Real implementations live in the
-/// serialization layer.
-class ExportedDocumentResolver {
-  static String resolve(String format, DocumentValue document,
-      PluginRegistry registry) {
-    return document.plainText;
   }
 }

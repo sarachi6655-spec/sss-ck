@@ -1,571 +1,395 @@
 import 'package:flutter/material.dart';
 
-import 'editor_theme_data.dart';
-
-/// Immutable theme token set for every editor surface.
-///
-/// Host applications can override any token via [copyWith] or [merge]. No
-/// built-in editor widget may use a hard-coded color, text style, spacing, or
-/// radius when a token exists.
+/// Immutable design token system controlling every visual attribute of the editor.
 @immutable
-class EditorTheme extends EditorThemeData {
-  // Surface
-  @override
+class EditorTheme {
+  const EditorTheme({
+    // Canvas & Core Colors
+    this.backgroundColor = Colors.white,
+    this.textColor = const Color(0xFF1E293B),
+    this.cursorColor = const Color(0xFF2563EB),
+    this.selectionColor = const Color(0x403B82F6),
+    this.placeholderColor = const Color(0xFF94A3B8),
+    this.borderColor = const Color(0xFFE2E8F0),
+    this.focusBorderColor = const Color(0xFF3B82F6),
+    this.contentPadding = const EdgeInsets.all(16.0),
+    this.borderRadius = 8.0,
+
+    // Toolbar & Menus
+    this.toolbarBackgroundColor = const Color(0xFFF8FAFC),
+    this.toolbarBorderColor = const Color(0xFFE2E8F0),
+    this.toolbarItemColor = const Color(0xFF475569),
+    this.toolbarItemActiveColor = const Color(0xFF2563EB),
+    this.toolbarItemActiveBackgroundColor = const Color(0xFFEFF6FF),
+    this.toolbarItemHoverColor = const Color(0xFFF1F5F9),
+    this.toolbarHeight = 44.0,
+    this.toolbarPadding = const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+    this.toolbarBorderRadius = 8.0,
+    this.toolbarElevation = 0.0,
+
+    // Typography
+    this.heading1Style = const TextStyle(fontSize: 28.0, fontWeight: FontWeight.bold, height: 1.3),
+    this.heading2Style = const TextStyle(fontSize: 24.0, fontWeight: FontWeight.bold, height: 1.3),
+    this.heading3Style = const TextStyle(fontSize: 20.0, fontWeight: FontWeight.w600, height: 1.3),
+    this.heading4Style = const TextStyle(fontSize: 18.0, fontWeight: FontWeight.w600, height: 1.3),
+    this.heading5Style = const TextStyle(fontSize: 16.0, fontWeight: FontWeight.w600, height: 1.3),
+    this.heading6Style = const TextStyle(fontSize: 14.0, fontWeight: FontWeight.w600, height: 1.3),
+    this.bodyStyle = const TextStyle(fontSize: 15.0, height: 1.6, color: Color(0xFF1E293B)),
+    this.captionStyle = const TextStyle(fontSize: 12.0, fontStyle: FontStyle.italic, color: Color(0xFF64748B)),
+
+    // Blockquote
+    this.blockquoteBorderColor = const Color(0xFFCBD5E1),
+    this.blockquoteBackgroundColor = const Color(0xFFF8FAFC),
+    this.blockquotePadding = const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+    this.blockquoteTextStyle = const TextStyle(fontSize: 15.0, fontStyle: FontStyle.italic, height: 1.6, color: Color(0xFF334155)),
+
+    // Code Block
+    this.codeBlockBackgroundColor = const Color(0xFF0F172A),
+    this.codeBlockBorderColor = const Color(0xFF1E293B),
+    this.codeBlockTextColor = const Color(0xFFF8FAFC),
+    this.codeBlockPadding = const EdgeInsets.all(12.0),
+    this.codeBlockBorderRadius = 6.0,
+    this.codeBlockTextStyle = const TextStyle(fontFamily: 'monospace', fontSize: 13.0, height: 1.5, color: Color(0xFFF8FAFC)),
+
+    // Tables
+    this.tableBorderColor = const Color(0xFFCBD5E1),
+    this.tableHeaderBackgroundColor = const Color(0xFFF1F5F9),
+    this.tableCellPadding = const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+
+    // Divider
+    this.hrColor = const Color(0xFFE2E8F0),
+    this.hrHeight = 1.0,
+
+    // Links
+    this.linkColor = const Color(0xFF2563EB),
+    this.linkHoverColor = const Color(0xFF1D4ED8),
+
+    // Media & Video
+    this.imageBorderRadius = 8.0,
+    this.videoBorderRadius = 8.0,
+    this.videoControlsBackgroundColor = const Color(0xCC000000),
+    this.uploadProgressColor = const Color(0xFF3B82F6),
+    this.uploadErrorColor = const Color(0xFFEF4444),
+
+    // Collaboration & Reviewer
+    this.commentHighlightColor = const Color(0x40FCD34D),
+    this.commentSidebarBackgroundColor = const Color(0xFFFFFBEB),
+    this.trackChangeInsertColor = const Color(0x4022C55E),
+    this.trackChangeDeleteColor = const Color(0x40EF4444),
+
+    // Dialogs & Overlays
+    this.dialogBackgroundColor = Colors.white,
+    this.dialogBorderColor = const Color(0xFFE2E8F0),
+    this.dialogTitleStyle = const TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold),
+    this.tooltipBackgroundColor = const Color(0xFF1E293B),
+    this.tooltipTextColor = Colors.white,
+
+    // Disabled / Read-Only
+    this.readOnlyBackgroundColor = const Color(0xFFFAFAFA),
+    this.disabledOpacity = 0.5,
+  });
+
+  // Canvas
   final Color backgroundColor;
-  @override
-  final Color surfaceColor;
-  @override
-  final Color foregroundColor;
-  @override
-  final Color disabledColor;
-  @override
-  final Color selectionColor;
-  @override
+  final Color textColor;
   final Color cursorColor;
-
-  // Borders / dividers
-  final Color borderColor;
-  final Color dividerColor;
-  final Color focusBorderColor;
-  final double borderWidth;
-  final double focusedBorderWidth;
-
-  // Placeholder / states
+  final Color selectionColor;
   final Color placeholderColor;
-  final Color readOnlyBackgroundColor;
-  final Color errorColor;
-  final Color warningColor;
-  final Color successColor;
+  final Color borderColor;
+  final Color focusBorderColor;
+  final EdgeInsets contentPadding;
+  final double borderRadius;
 
-  // Toolbar / menu
-  @override
-  final TextStyle toolbarStyle;
+  // Toolbar
   final Color toolbarBackgroundColor;
-  final Color toolbarForegroundColor;
-  final Color toolbarHoverColor;
-  final Color toolbarSelectedColor;
-  final Color toolbarDisabledColor;
   final Color toolbarBorderColor;
+  final Color toolbarItemColor;
+  final Color toolbarItemActiveColor;
+  final Color toolbarItemActiveBackgroundColor;
+  final Color toolbarItemHoverColor;
   final double toolbarHeight;
-  final double toolbarIconSize;
-  final double toolbarSpacing;
+  final EdgeInsets toolbarPadding;
+  final double toolbarBorderRadius;
+  final double toolbarElevation;
 
   // Typography
-  final TextStyle titleStyle;
-  @override
-  final TextStyle paragraphStyle;
   final TextStyle heading1Style;
   final TextStyle heading2Style;
   final TextStyle heading3Style;
   final TextStyle heading4Style;
   final TextStyle heading5Style;
   final TextStyle heading6Style;
-  final TextStyle quoteStyle;
-  final TextStyle codeStyle;
+  final TextStyle bodyStyle;
   final TextStyle captionStyle;
 
-  // Spacing / shape
-  @override
-  final double spacingUnit;
-  final double paragraphSpacing;
-  final double blockSpacing;
-  @override
-  final double borderRadius;
-  final double smallRadius;
-  final double dialogRadius;
+  // Blockquote
+  final Color blockquoteBorderColor;
+  final Color blockquoteBackgroundColor;
+  final EdgeInsets blockquotePadding;
+  final TextStyle blockquoteTextStyle;
 
-  // Elevations
-  final double toolbarElevation;
-  final double menuElevation;
-  final double dialogElevation;
-
-  // Icons
-  final IconThemeData iconTheme;
-
-  // Density
-  final EdgeInsets contentPadding;
-  final EdgeInsets toolbarPadding;
-  final EdgeInsets menuPadding;
-
-  // Feature-specific
-  final Color linkColor;
-  final Color linkHoverColor;
+  // Code Block
   final Color codeBlockBackgroundColor;
   final Color codeBlockBorderColor;
-  final Color quoteBorderColor;
-  final Color quoteBackgroundColor;
+  final Color codeBlockTextColor;
+  final EdgeInsets codeBlockPadding;
+  final double codeBlockBorderRadius;
+  final TextStyle codeBlockTextStyle;
+
+  // Tables
   final Color tableBorderColor;
   final Color tableHeaderBackgroundColor;
-  final Color tableCellBackgroundColor;
-  final Color imagePlaceholderColor;
-  final Color videoPosterBackgroundColor;
+  final EdgeInsets tableCellPadding;
+
+  // Divider
+  final Color hrColor;
+  final double hrHeight;
+
+  // Links
+  final Color linkColor;
+  final Color linkHoverColor;
+
+  // Media
+  final double imageBorderRadius;
+  final double videoBorderRadius;
+  final Color videoControlsBackgroundColor;
   final Color uploadProgressColor;
   final Color uploadErrorColor;
-  final Color commentBackgroundColor;
-  final Color suggestionAddColor;
-  final Color suggestionRemoveColor;
 
-  const EditorTheme({
-    required this.backgroundColor,
-    required this.surfaceColor,
-    required this.foregroundColor,
-    required this.disabledColor,
-    required this.selectionColor,
-    required this.cursorColor,
-    required this.borderColor,
-    required this.dividerColor,
-    required this.focusBorderColor,
-    required this.borderWidth,
-    required this.focusedBorderWidth,
-    required this.placeholderColor,
-    required this.readOnlyBackgroundColor,
-    required this.errorColor,
-    required this.warningColor,
-    required this.successColor,
-    required this.toolbarStyle,
-    required this.toolbarBackgroundColor,
-    required this.toolbarForegroundColor,
-    required this.toolbarHoverColor,
-    required this.toolbarSelectedColor,
-    required this.toolbarDisabledColor,
-    required this.toolbarBorderColor,
-    required this.toolbarHeight,
-    required this.toolbarIconSize,
-    required this.toolbarSpacing,
-    required this.titleStyle,
-    required this.paragraphStyle,
-    required this.heading1Style,
-    required this.heading2Style,
-    required this.heading3Style,
-    required this.heading4Style,
-    required this.heading5Style,
-    required this.heading6Style,
-    required this.quoteStyle,
-    required this.codeStyle,
-    required this.captionStyle,
-    required this.spacingUnit,
-    required this.paragraphSpacing,
-    required this.blockSpacing,
-    required this.borderRadius,
-    required this.smallRadius,
-    required this.dialogRadius,
-    required this.toolbarElevation,
-    required this.menuElevation,
-    required this.dialogElevation,
-    required this.iconTheme,
-    required this.contentPadding,
-    required this.toolbarPadding,
-    required this.menuPadding,
-    required this.linkColor,
-    required this.linkHoverColor,
-    required this.codeBlockBackgroundColor,
-    required this.codeBlockBorderColor,
-    required this.quoteBorderColor,
-    required this.quoteBackgroundColor,
-    required this.tableBorderColor,
-    required this.tableHeaderBackgroundColor,
-    required this.tableCellBackgroundColor,
-    required this.imagePlaceholderColor,
-    required this.videoPosterBackgroundColor,
-    required this.uploadProgressColor,
-    required this.uploadErrorColor,
-    required this.commentBackgroundColor,
-    required this.suggestionAddColor,
-    required this.suggestionRemoveColor,
-  });
+  // Collaboration
+  final Color commentHighlightColor;
+  final Color commentSidebarBackgroundColor;
+  final Color trackChangeInsertColor;
+  final Color trackChangeDeleteColor;
 
-  factory EditorTheme.light({TextTheme? textTheme}) {
-    final TextTheme base = textTheme ?? Typography.material2021().black;
-    const Color primary = Color(0xFF1976D2);
-    const Color onSurface = Color(0xFF1F1F1F);
-    const Color surface = Color(0xFFFFFFFF);
-    const Color background = Color(0xFFF5F5F5);
-    const TextStyle baseStyle = TextStyle(fontSize: 16, color: onSurface);
+  // Dialogs
+  final Color dialogBackgroundColor;
+  final Color dialogBorderColor;
+  final TextStyle dialogTitleStyle;
+  final Color tooltipBackgroundColor;
+  final Color tooltipTextColor;
+
+  // Read-only
+  final Color readOnlyBackgroundColor;
+  final double disabledOpacity;
+
+  /// Default clean light theme.
+  factory EditorTheme.light() => const EditorTheme();
+
+  /// Sleek dark theme.
+  factory EditorTheme.dark() {
+    return const EditorTheme(
+      backgroundColor: Color(0xFF0F172A),
+      textColor: Color(0xFFF8FAFC),
+      cursorColor: Color(0xFF60A5FA),
+      selectionColor: Color(0x4060A5FA),
+      placeholderColor: Color(0xFF64748B),
+      borderColor: Color(0xFF334155),
+      focusBorderColor: Color(0xFF60A5FA),
+      toolbarBackgroundColor: Color(0xFF1E293B),
+      toolbarBorderColor: Color(0xFF334155),
+      toolbarItemColor: Color(0xFF94A3B8),
+      toolbarItemActiveColor: Color(0xFF60A5FA),
+      toolbarItemActiveBackgroundColor: Color(0xFF1E3A8A),
+      toolbarItemHoverColor: Color(0xFF334155),
+      bodyStyle: TextStyle(fontSize: 15.0, height: 1.6, color: Color(0xFFF8FAFC)),
+      captionStyle: TextStyle(fontSize: 12.0, fontStyle: FontStyle.italic, color: Color(0xFF94A3B8)),
+      blockquoteBorderColor: Color(0xFF475569),
+      blockquoteBackgroundColor: Color(0xFF1E293B),
+      blockquoteTextStyle: TextStyle(fontSize: 15.0, fontStyle: FontStyle.italic, height: 1.6, color: Color(0xFFCBD5E1)),
+      codeBlockBackgroundColor: Color(0xFF020617),
+      codeBlockBorderColor: Color(0xFF1E293B),
+      tableBorderColor: Color(0xFF334155),
+      tableHeaderBackgroundColor: Color(0xFF1E293B),
+      hrColor: Color(0xFF334155),
+      linkColor: Color(0xFF60A5FA),
+      linkHoverColor: Color(0xFF93C5FD),
+      readOnlyBackgroundColor: Color(0xFF090D16),
+      dialogBackgroundColor: Color(0xFF1E293B),
+      dialogBorderColor: Color(0xFF334155),
+      dialogTitleStyle: TextStyle(fontSize: 18.0, fontWeight: FontWeight.bold, color: Colors.white),
+    );
+  }
+
+  /// Whether this theme represents a dark theme.
+  bool get isDark => backgroundColor.computeLuminance() < 0.5;
+
+  /// Derives an [EditorTheme] matching the host app's [ThemeData].
+  factory EditorTheme.fromThemeData(ThemeData theme) {
+    final bool isDark = theme.brightness == Brightness.dark;
+    final Color primary = theme.colorScheme.primary;
+
     return EditorTheme(
-      backgroundColor: background,
-      surfaceColor: surface,
-      foregroundColor: onSurface,
-      disabledColor: const Color(0xFFBDBDBD),
-      selectionColor: primary.withOpacity(0.3),
+      backgroundColor: theme.colorScheme.surface,
+      textColor: theme.colorScheme.onSurface,
       cursorColor: primary,
-      borderColor: const Color(0xFFE0E0E0),
-      dividerColor: const Color(0xFFE0E0E0),
+      selectionColor: primary.withValues(alpha: 0.3),
+      borderColor: theme.dividerColor,
       focusBorderColor: primary,
-      borderWidth: 1,
-      focusedBorderWidth: 2,
-      placeholderColor: const Color(0xFF9E9E9E),
-      readOnlyBackgroundColor: const Color(0xFFEEEEEE),
-      errorColor: const Color(0xFFD32F2F),
-      warningColor: const Color(0xFFF57C00),
-      successColor: const Color(0xFF388E3C),
-      toolbarStyle: base.labelMedium ?? baseStyle,
-      toolbarBackgroundColor: surface,
-      toolbarForegroundColor: onSurface,
-      toolbarHoverColor: const Color(0xFFEEEEEE),
-      toolbarSelectedColor: primary.withOpacity(0.15),
-      toolbarDisabledColor: const Color(0xFFBDBDBD),
-      toolbarBorderColor: const Color(0xFFE0E0E0),
-      toolbarHeight: 48,
-      toolbarIconSize: 20,
-      toolbarSpacing: 4,
-      titleStyle: base.titleLarge ?? baseStyle,
-      paragraphStyle: base.bodyLarge ?? baseStyle,
-      heading1Style: (base.displaySmall ?? baseStyle).copyWith(fontSize: 32),
-      heading2Style: (base.headlineMedium ?? baseStyle).copyWith(fontSize: 28),
-      heading3Style: (base.headlineSmall ?? baseStyle).copyWith(fontSize: 24),
-      heading4Style: (base.titleLarge ?? baseStyle).copyWith(fontSize: 20),
-      heading5Style: (base.titleMedium ?? baseStyle).copyWith(fontSize: 18),
-      heading6Style: (base.titleSmall ?? baseStyle).copyWith(fontSize: 16),
-      quoteStyle: (base.bodyLarge ?? baseStyle)
-          .copyWith(fontStyle: FontStyle.italic, color: Color(0xFF616161)),
-      codeStyle: base.bodyMedium?.copyWith(fontFamily: 'monospace') ??
-          baseStyle.copyWith(fontFamily: 'monospace'),
-      captionStyle: (base.bodySmall ?? baseStyle).copyWith(color: Color(0xFF757575)),
-      spacingUnit: 8,
-      paragraphSpacing: 12,
-      blockSpacing: 16,
-      borderRadius: 8,
-      smallRadius: 4,
-      dialogRadius: 12,
-      toolbarElevation: 2,
-      menuElevation: 4,
-      dialogElevation: 8,
-      iconTheme: const IconThemeData(color: onSurface, size: 20),
-      contentPadding: const EdgeInsets.all(16),
-      toolbarPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      menuPadding: const EdgeInsets.symmetric(vertical: 8),
-      linkColor: primary,
-      linkHoverColor: const Color(0xFF0D47A1),
-      codeBlockBackgroundColor: const Color(0xFFF5F5F5),
-      codeBlockBorderColor: const Color(0xFFE0E0E0),
-      quoteBorderColor: const Color(0xFFE0E0E0),
-      quoteBackgroundColor: const Color(0xFFF5F5F5),
-      tableBorderColor: const Color(0xFFBDBDBD),
-      tableHeaderBackgroundColor: const Color(0xFFEEEEEE),
-      tableCellBackgroundColor: surface,
-      imagePlaceholderColor: const Color(0xFFE0E0E0),
-      videoPosterBackgroundColor: const Color(0xFF212121),
-      uploadProgressColor: primary,
-      uploadErrorColor: const Color(0xFFD32F2F),
-      commentBackgroundColor: const Color(0xFFFFF9C4),
-      suggestionAddColor: const Color(0xFFC8E6C9),
-      suggestionRemoveColor: const Color(0xFFFFCDD2),
+      toolbarBackgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+      toolbarBorderColor: theme.dividerColor,
+      toolbarItemColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+      toolbarItemActiveColor: primary,
+      toolbarItemActiveBackgroundColor: primary.withValues(alpha: 0.15),
+      bodyStyle: TextStyle(fontSize: 15.0, height: 1.6, color: theme.colorScheme.onSurface),
+      dialogBackgroundColor: theme.dialogTheme.backgroundColor ?? theme.colorScheme.surface,
     );
   }
 
-  factory EditorTheme.dark({TextTheme? textTheme}) {
-    final TextTheme base = textTheme ?? Typography.material2021().white;
-    const Color primary = Color(0xFF90CAF9);
-    const Color onSurface = Color(0xFFE0E0E0);
-    const Color surface = Color(0xFF1E1E1E);
-    const Color background = Color(0xFF121212);
-    const TextStyle baseStyle = TextStyle(fontSize: 16, color: onSurface);
-    return EditorTheme(
-      backgroundColor: background,
-      surfaceColor: surface,
-      foregroundColor: onSurface,
-      disabledColor: const Color(0xFF616161),
-      selectionColor: primary.withOpacity(0.3),
-      cursorColor: primary,
-      borderColor: const Color(0xFF424242),
-      dividerColor: const Color(0xFF424242),
-      focusBorderColor: primary,
-      borderWidth: 1,
-      focusedBorderWidth: 2,
-      placeholderColor: const Color(0xFF757575),
-      readOnlyBackgroundColor: const Color(0xFF1E1E1E),
-      errorColor: const Color(0xFFEF5350),
-      warningColor: const Color(0xFFFFA726),
-      successColor: const Color(0xFF66BB6A),
-      toolbarStyle: base.labelMedium ?? baseStyle,
-      toolbarBackgroundColor: surface,
-      toolbarForegroundColor: onSurface,
-      toolbarHoverColor: const Color(0xFF2C2C2C),
-      toolbarSelectedColor: primary.withOpacity(0.15),
-      toolbarDisabledColor: const Color(0xFF616161),
-      toolbarBorderColor: const Color(0xFF424242),
-      toolbarHeight: 48,
-      toolbarIconSize: 20,
-      toolbarSpacing: 4,
-      titleStyle: base.titleLarge ?? baseStyle,
-      paragraphStyle: base.bodyLarge ?? baseStyle,
-      heading1Style: (base.displaySmall ?? baseStyle).copyWith(fontSize: 32),
-      heading2Style: (base.headlineMedium ?? baseStyle).copyWith(fontSize: 28),
-      heading3Style: (base.headlineSmall ?? baseStyle).copyWith(fontSize: 24),
-      heading4Style: (base.titleLarge ?? baseStyle).copyWith(fontSize: 20),
-      heading5Style: (base.titleMedium ?? baseStyle).copyWith(fontSize: 18),
-      heading6Style: (base.titleSmall ?? baseStyle).copyWith(fontSize: 16),
-      quoteStyle: (base.bodyLarge ?? baseStyle)
-          .copyWith(fontStyle: FontStyle.italic, color: Color(0xFFBDBDBD)),
-      codeStyle: base.bodyMedium?.copyWith(fontFamily: 'monospace') ??
-          baseStyle.copyWith(fontFamily: 'monospace'),
-      captionStyle: (base.bodySmall ?? baseStyle).copyWith(color: Color(0xFF9E9E9E)),
-      spacingUnit: 8,
-      paragraphSpacing: 12,
-      blockSpacing: 16,
-      borderRadius: 8,
-      smallRadius: 4,
-      dialogRadius: 12,
-      toolbarElevation: 2,
-      menuElevation: 4,
-      dialogElevation: 8,
-      iconTheme: const IconThemeData(color: onSurface, size: 20),
-      contentPadding: const EdgeInsets.all(16),
-      toolbarPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      menuPadding: const EdgeInsets.symmetric(vertical: 8),
-      linkColor: primary,
-      linkHoverColor: const Color(0xFFBBDEFB),
-      codeBlockBackgroundColor: const Color(0xFF2C2C2C),
-      codeBlockBorderColor: const Color(0xFF424242),
-      quoteBorderColor: const Color(0xFF424242),
-      quoteBackgroundColor: const Color(0xFF1E1E1E),
-      tableBorderColor: const Color(0xFF616161),
-      tableHeaderBackgroundColor: const Color(0xFF2C2C2C),
-      tableCellBackgroundColor: surface,
-      imagePlaceholderColor: const Color(0xFF424242),
-      videoPosterBackgroundColor: const Color(0xFF000000),
-      uploadProgressColor: primary,
-      uploadErrorColor: const Color(0xFFEF5350),
-      commentBackgroundColor: const Color(0xFF3E3B26),
-      suggestionAddColor: const Color(0xFF2E4C33),
-      suggestionRemoveColor: const Color(0xFF4C2E2E),
-    );
-  }
-
-  /// Merge another [EditorTheme] on top of this one, overriding only non-null
-  /// fields.
-  EditorTheme merge(EditorTheme? other) {
-    if (other == null) return this;
-    return copyWith(
-      backgroundColor: other.backgroundColor,
-      surfaceColor: other.surfaceColor,
-      foregroundColor: other.foregroundColor,
-      disabledColor: other.disabledColor,
-      selectionColor: other.selectionColor,
-      cursorColor: other.cursorColor,
-      borderColor: other.borderColor,
-      dividerColor: other.dividerColor,
-      focusBorderColor: other.focusBorderColor,
-      borderWidth: other.borderWidth,
-      focusedBorderWidth: other.focusedBorderWidth,
-      placeholderColor: other.placeholderColor,
-      readOnlyBackgroundColor: other.readOnlyBackgroundColor,
-      errorColor: other.errorColor,
-      warningColor: other.warningColor,
-      successColor: other.successColor,
-      toolbarStyle: other.toolbarStyle,
-      toolbarBackgroundColor: other.toolbarBackgroundColor,
-      toolbarForegroundColor: other.toolbarForegroundColor,
-      toolbarHoverColor: other.toolbarHoverColor,
-      toolbarSelectedColor: other.toolbarSelectedColor,
-      toolbarDisabledColor: other.toolbarDisabledColor,
-      toolbarBorderColor: other.toolbarBorderColor,
-      toolbarHeight: other.toolbarHeight,
-      toolbarIconSize: other.toolbarIconSize,
-      toolbarSpacing: other.toolbarSpacing,
-      titleStyle: other.titleStyle,
-      paragraphStyle: other.paragraphStyle,
-      heading1Style: other.heading1Style,
-      heading2Style: other.heading2Style,
-      heading3Style: other.heading3Style,
-      heading4Style: other.heading4Style,
-      heading5Style: other.heading5Style,
-      heading6Style: other.heading6Style,
-      quoteStyle: other.quoteStyle,
-      codeStyle: other.codeStyle,
-      captionStyle: other.captionStyle,
-      spacingUnit: other.spacingUnit,
-      paragraphSpacing: other.paragraphSpacing,
-      blockSpacing: other.blockSpacing,
-      borderRadius: other.borderRadius,
-      smallRadius: other.smallRadius,
-      dialogRadius: other.dialogRadius,
-      toolbarElevation: other.toolbarElevation,
-      menuElevation: other.menuElevation,
-      dialogElevation: other.dialogElevation,
-      iconTheme: other.iconTheme,
-      contentPadding: other.contentPadding,
-      toolbarPadding: other.toolbarPadding,
-      menuPadding: other.menuPadding,
-      linkColor: other.linkColor,
-      linkHoverColor: other.linkHoverColor,
-      codeBlockBackgroundColor: other.codeBlockBackgroundColor,
-      codeBlockBorderColor: other.codeBlockBorderColor,
-      quoteBorderColor: other.quoteBorderColor,
-      quoteBackgroundColor: other.quoteBackgroundColor,
-      tableBorderColor: other.tableBorderColor,
-      tableHeaderBackgroundColor: other.tableHeaderBackgroundColor,
-      tableCellBackgroundColor: other.tableCellBackgroundColor,
-      imagePlaceholderColor: other.imagePlaceholderColor,
-      videoPosterBackgroundColor: other.videoPosterBackgroundColor,
-      uploadProgressColor: other.uploadProgressColor,
-      uploadErrorColor: other.uploadErrorColor,
-      commentBackgroundColor: other.commentBackgroundColor,
-      suggestionAddColor: other.suggestionAddColor,
-      suggestionRemoveColor: other.suggestionRemoveColor,
-    );
-  }
-
+  /// Copies this theme with token overrides.
   EditorTheme copyWith({
     Color? backgroundColor,
-    Color? surfaceColor,
-    Color? foregroundColor,
-    Color? disabledColor,
-    Color? selectionColor,
+    Color? textColor,
     Color? cursorColor,
-    Color? borderColor,
-    Color? dividerColor,
-    Color? focusBorderColor,
-    double? borderWidth,
-    double? focusedBorderWidth,
+    Color? selectionColor,
     Color? placeholderColor,
-    Color? readOnlyBackgroundColor,
-    Color? errorColor,
-    Color? warningColor,
-    Color? successColor,
-    TextStyle? toolbarStyle,
+    Color? borderColor,
+    Color? focusBorderColor,
+    EdgeInsets? contentPadding,
+    double? borderRadius,
     Color? toolbarBackgroundColor,
-    Color? toolbarForegroundColor,
-    Color? toolbarHoverColor,
-    Color? toolbarSelectedColor,
-    Color? toolbarDisabledColor,
     Color? toolbarBorderColor,
+    Color? toolbarItemColor,
+    Color? toolbarItemActiveColor,
+    Color? toolbarItemActiveBackgroundColor,
+    Color? toolbarItemHoverColor,
     double? toolbarHeight,
-    double? toolbarIconSize,
-    double? toolbarSpacing,
-    TextStyle? titleStyle,
-    TextStyle? paragraphStyle,
+    EdgeInsets? toolbarPadding,
+    double? toolbarBorderRadius,
+    double? toolbarElevation,
     TextStyle? heading1Style,
     TextStyle? heading2Style,
     TextStyle? heading3Style,
     TextStyle? heading4Style,
     TextStyle? heading5Style,
     TextStyle? heading6Style,
-    TextStyle? quoteStyle,
-    TextStyle? codeStyle,
+    TextStyle? bodyStyle,
     TextStyle? captionStyle,
-    double? spacingUnit,
-    double? paragraphSpacing,
-    double? blockSpacing,
-    double? borderRadius,
-    double? smallRadius,
-    double? dialogRadius,
-    double? toolbarElevation,
-    double? menuElevation,
-    double? dialogElevation,
-    IconThemeData? iconTheme,
-    EdgeInsets? contentPadding,
-    EdgeInsets? toolbarPadding,
-    EdgeInsets? menuPadding,
-    Color? linkColor,
-    Color? linkHoverColor,
+    Color? blockquoteBorderColor,
+    Color? blockquoteBackgroundColor,
+    EdgeInsets? blockquotePadding,
+    TextStyle? blockquoteTextStyle,
     Color? codeBlockBackgroundColor,
     Color? codeBlockBorderColor,
-    Color? quoteBorderColor,
-    Color? quoteBackgroundColor,
+    Color? codeBlockTextColor,
+    EdgeInsets? codeBlockPadding,
+    double? codeBlockBorderRadius,
+    TextStyle? codeBlockTextStyle,
     Color? tableBorderColor,
     Color? tableHeaderBackgroundColor,
-    Color? tableCellBackgroundColor,
-    Color? imagePlaceholderColor,
-    Color? videoPosterBackgroundColor,
+    EdgeInsets? tableCellPadding,
+    Color? hrColor,
+    double? hrHeight,
+    Color? linkColor,
+    Color? linkHoverColor,
+    double? imageBorderRadius,
+    double? videoBorderRadius,
+    Color? videoControlsBackgroundColor,
     Color? uploadProgressColor,
     Color? uploadErrorColor,
-    Color? commentBackgroundColor,
-    Color? suggestionAddColor,
-    Color? suggestionRemoveColor,
-  }) =>
-      EditorTheme(
-        backgroundColor: backgroundColor ?? this.backgroundColor,
-        surfaceColor: surfaceColor ?? this.surfaceColor,
-        foregroundColor: foregroundColor ?? this.foregroundColor,
-        disabledColor: disabledColor ?? this.disabledColor,
-        selectionColor: selectionColor ?? this.selectionColor,
-        cursorColor: cursorColor ?? this.cursorColor,
-        borderColor: borderColor ?? this.borderColor,
-        dividerColor: dividerColor ?? this.dividerColor,
-        focusBorderColor: focusBorderColor ?? this.focusBorderColor,
-        borderWidth: borderWidth ?? this.borderWidth,
-        focusedBorderWidth: focusedBorderWidth ?? this.focusedBorderWidth,
-        placeholderColor: placeholderColor ?? this.placeholderColor,
-        readOnlyBackgroundColor:
-            readOnlyBackgroundColor ?? this.readOnlyBackgroundColor,
-        errorColor: errorColor ?? this.errorColor,
-        warningColor: warningColor ?? this.warningColor,
-        successColor: successColor ?? this.successColor,
-        toolbarStyle: toolbarStyle ?? this.toolbarStyle,
-        toolbarBackgroundColor:
-            toolbarBackgroundColor ?? this.toolbarBackgroundColor,
-        toolbarForegroundColor:
-            toolbarForegroundColor ?? this.toolbarForegroundColor,
-        toolbarHoverColor: toolbarHoverColor ?? this.toolbarHoverColor,
-        toolbarSelectedColor:
-            toolbarSelectedColor ?? this.toolbarSelectedColor,
-        toolbarDisabledColor: toolbarDisabledColor ?? this.toolbarDisabledColor,
-        toolbarBorderColor: toolbarBorderColor ?? this.toolbarBorderColor,
-        toolbarHeight: toolbarHeight ?? this.toolbarHeight,
-        toolbarIconSize: toolbarIconSize ?? this.toolbarIconSize,
-        toolbarSpacing: toolbarSpacing ?? this.toolbarSpacing,
-        titleStyle: titleStyle ?? this.titleStyle,
-        paragraphStyle: paragraphStyle ?? this.paragraphStyle,
-        heading1Style: heading1Style ?? this.heading1Style,
-        heading2Style: heading2Style ?? this.heading2Style,
-        heading3Style: heading3Style ?? this.heading3Style,
-        heading4Style: heading4Style ?? this.heading4Style,
-        heading5Style: heading5Style ?? this.heading5Style,
-        heading6Style: heading6Style ?? this.heading6Style,
-        quoteStyle: quoteStyle ?? this.quoteStyle,
-        codeStyle: codeStyle ?? this.codeStyle,
-        captionStyle: captionStyle ?? this.captionStyle,
-        spacingUnit: spacingUnit ?? this.spacingUnit,
-        paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
-        blockSpacing: blockSpacing ?? this.blockSpacing,
-        borderRadius: borderRadius ?? this.borderRadius,
-        smallRadius: smallRadius ?? this.smallRadius,
-        dialogRadius: dialogRadius ?? this.dialogRadius,
-        toolbarElevation: toolbarElevation ?? this.toolbarElevation,
-        menuElevation: menuElevation ?? this.menuElevation,
-        dialogElevation: dialogElevation ?? this.dialogElevation,
-        iconTheme: iconTheme ?? this.iconTheme,
-        contentPadding: contentPadding ?? this.contentPadding,
-        toolbarPadding: toolbarPadding ?? this.toolbarPadding,
-        menuPadding: menuPadding ?? this.menuPadding,
-        linkColor: linkColor ?? this.linkColor,
-        linkHoverColor: linkHoverColor ?? this.linkHoverColor,
-        codeBlockBackgroundColor:
-            codeBlockBackgroundColor ?? this.codeBlockBackgroundColor,
-        codeBlockBorderColor: codeBlockBorderColor ?? this.codeBlockBorderColor,
-        quoteBorderColor: quoteBorderColor ?? this.quoteBorderColor,
-        quoteBackgroundColor: quoteBackgroundColor ?? this.quoteBackgroundColor,
-        tableBorderColor: tableBorderColor ?? this.tableBorderColor,
-        tableHeaderBackgroundColor:
-            tableHeaderBackgroundColor ?? this.tableHeaderBackgroundColor,
-        tableCellBackgroundColor:
-            tableCellBackgroundColor ?? this.tableCellBackgroundColor,
-        imagePlaceholderColor:
-            imagePlaceholderColor ?? this.imagePlaceholderColor,
-        videoPosterBackgroundColor:
-            videoPosterBackgroundColor ?? this.videoPosterBackgroundColor,
-        uploadProgressColor: uploadProgressColor ?? this.uploadProgressColor,
-        uploadErrorColor: uploadErrorColor ?? this.uploadErrorColor,
-        commentBackgroundColor:
-            commentBackgroundColor ?? this.commentBackgroundColor,
-        suggestionAddColor: suggestionAddColor ?? this.suggestionAddColor,
-        suggestionRemoveColor:
-            suggestionRemoveColor ?? this.suggestionRemoveColor,
-      );
+    Color? commentHighlightColor,
+    Color? commentSidebarBackgroundColor,
+    Color? trackChangeInsertColor,
+    Color? trackChangeDeleteColor,
+    Color? dialogBackgroundColor,
+    Color? dialogBorderColor,
+    TextStyle? dialogTitleStyle,
+    Color? tooltipBackgroundColor,
+    Color? tooltipTextColor,
+    Color? readOnlyBackgroundColor,
+    double? disabledOpacity,
+  }) {
+    return EditorTheme(
+      backgroundColor: backgroundColor ?? this.backgroundColor,
+      textColor: textColor ?? this.textColor,
+      cursorColor: cursorColor ?? this.cursorColor,
+      selectionColor: selectionColor ?? this.selectionColor,
+      placeholderColor: placeholderColor ?? this.placeholderColor,
+      borderColor: borderColor ?? this.borderColor,
+      focusBorderColor: focusBorderColor ?? this.focusBorderColor,
+      contentPadding: contentPadding ?? this.contentPadding,
+      borderRadius: borderRadius ?? this.borderRadius,
+      toolbarBackgroundColor: toolbarBackgroundColor ?? this.toolbarBackgroundColor,
+      toolbarBorderColor: toolbarBorderColor ?? this.toolbarBorderColor,
+      toolbarItemColor: toolbarItemColor ?? this.toolbarItemColor,
+      toolbarItemActiveColor: toolbarItemActiveColor ?? this.toolbarItemActiveColor,
+      toolbarItemActiveBackgroundColor:
+          toolbarItemActiveBackgroundColor ?? this.toolbarItemActiveBackgroundColor,
+      toolbarItemHoverColor: toolbarItemHoverColor ?? this.toolbarItemHoverColor,
+      toolbarHeight: toolbarHeight ?? this.toolbarHeight,
+      toolbarPadding: toolbarPadding ?? this.toolbarPadding,
+      toolbarBorderRadius: toolbarBorderRadius ?? this.toolbarBorderRadius,
+      toolbarElevation: toolbarElevation ?? this.toolbarElevation,
+      heading1Style: heading1Style ?? this.heading1Style,
+      heading2Style: heading2Style ?? this.heading2Style,
+      heading3Style: heading3Style ?? this.heading3Style,
+      heading4Style: heading4Style ?? this.heading4Style,
+      heading5Style: heading5Style ?? this.heading5Style,
+      heading6Style: heading6Style ?? this.heading6Style,
+      bodyStyle: bodyStyle ?? this.bodyStyle,
+      captionStyle: captionStyle ?? this.captionStyle,
+      blockquoteBorderColor: blockquoteBorderColor ?? this.blockquoteBorderColor,
+      blockquoteBackgroundColor: blockquoteBackgroundColor ?? this.blockquoteBackgroundColor,
+      blockquotePadding: blockquotePadding ?? this.blockquotePadding,
+      blockquoteTextStyle: blockquoteTextStyle ?? this.blockquoteTextStyle,
+      codeBlockBackgroundColor: codeBlockBackgroundColor ?? this.codeBlockBackgroundColor,
+      codeBlockBorderColor: codeBlockBorderColor ?? this.codeBlockBorderColor,
+      codeBlockTextColor: codeBlockTextColor ?? this.codeBlockTextColor,
+      codeBlockPadding: codeBlockPadding ?? this.codeBlockPadding,
+      codeBlockBorderRadius: codeBlockBorderRadius ?? this.codeBlockBorderRadius,
+      codeBlockTextStyle: codeBlockTextStyle ?? this.codeBlockTextStyle,
+      tableBorderColor: tableBorderColor ?? this.tableBorderColor,
+      tableHeaderBackgroundColor: tableHeaderBackgroundColor ?? this.tableHeaderBackgroundColor,
+      tableCellPadding: tableCellPadding ?? this.tableCellPadding,
+      hrColor: hrColor ?? this.hrColor,
+      hrHeight: hrHeight ?? this.hrHeight,
+      linkColor: linkColor ?? this.linkColor,
+      linkHoverColor: linkHoverColor ?? this.linkHoverColor,
+      imageBorderRadius: imageBorderRadius ?? this.imageBorderRadius,
+      videoBorderRadius: videoBorderRadius ?? this.videoBorderRadius,
+      videoControlsBackgroundColor:
+          videoControlsBackgroundColor ?? this.videoControlsBackgroundColor,
+      uploadProgressColor: uploadProgressColor ?? this.uploadProgressColor,
+      uploadErrorColor: uploadErrorColor ?? this.uploadErrorColor,
+      commentHighlightColor: commentHighlightColor ?? this.commentHighlightColor,
+      commentSidebarBackgroundColor:
+          commentSidebarBackgroundColor ?? this.commentSidebarBackgroundColor,
+      trackChangeInsertColor: trackChangeInsertColor ?? this.trackChangeInsertColor,
+      trackChangeDeleteColor: trackChangeDeleteColor ?? this.trackChangeDeleteColor,
+      dialogBackgroundColor: dialogBackgroundColor ?? this.dialogBackgroundColor,
+      dialogBorderColor: dialogBorderColor ?? this.dialogBorderColor,
+      dialogTitleStyle: dialogTitleStyle ?? this.dialogTitleStyle,
+      tooltipBackgroundColor: tooltipBackgroundColor ?? this.tooltipBackgroundColor,
+      tooltipTextColor: tooltipTextColor ?? this.tooltipTextColor,
+      readOnlyBackgroundColor: readOnlyBackgroundColor ?? this.readOnlyBackgroundColor,
+      disabledOpacity: disabledOpacity ?? this.disabledOpacity,
+    );
+  }
 
-  /// Build an [EditorTheme] from the host [ThemeData].
-  factory EditorTheme.fromThemeData(ThemeData theme) {
-    return (theme.brightness == Brightness.dark
-            ? EditorTheme.dark(textTheme: theme.textTheme)
-            : EditorTheme.light(textTheme: theme.textTheme))
-        .copyWith(
-      backgroundColor: theme.colorScheme.surface,
-      surfaceColor: theme.colorScheme.surfaceContainerHighest,
-      foregroundColor: theme.colorScheme.onSurface,
-      cursorColor: theme.colorScheme.primary,
-      selectionColor: theme.colorScheme.primary.withOpacity(0.3),
-      linkColor: theme.colorScheme.primary,
+  /// Merges overrides from [other] into this theme.
+  EditorTheme merge(EditorTheme? other) {
+    if (other == null) return this;
+    return copyWith(
+      backgroundColor: other.backgroundColor != const Color(0xFFFFFFFF) ? other.backgroundColor : null,
+      textColor: other.textColor,
+      cursorColor: other.cursorColor,
+      selectionColor: other.selectionColor,
+      placeholderColor: other.placeholderColor,
+      borderColor: other.borderColor,
+      focusBorderColor: other.focusBorderColor,
+      toolbarBackgroundColor: other.toolbarBackgroundColor,
+      toolbarBorderColor: other.toolbarBorderColor,
+      toolbarItemColor: other.toolbarItemColor,
+      toolbarItemActiveColor: other.toolbarItemActiveColor,
+      toolbarItemActiveBackgroundColor: other.toolbarItemActiveBackgroundColor,
+      bodyStyle: other.bodyStyle,
+      blockquoteBorderColor: other.blockquoteBorderColor,
+      blockquoteBackgroundColor: other.blockquoteBackgroundColor,
+      codeBlockBackgroundColor: other.codeBlockBackgroundColor,
+      tableBorderColor: other.tableBorderColor,
+      hrColor: other.hrColor,
+      linkColor: other.linkColor,
+      dialogBackgroundColor: other.dialogBackgroundColor,
     );
   }
 }

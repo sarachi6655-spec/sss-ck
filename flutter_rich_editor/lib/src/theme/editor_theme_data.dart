@@ -1,20 +1,31 @@
 import 'package:flutter/material.dart';
+import 'editor_theme.dart';
 
-/// Base theme data contract used by the plugin system and document model.
-///
-/// The full [EditorTheme] implementation lives in `editor_theme.dart` in this
-/// folder and adds every token required by the editor surfaces. This base
-/// class keeps the core layer free of theme details while allowing plugins to
-/// depend on a stable contract.
-abstract class EditorThemeData {
-  Color get backgroundColor;
-  Color get surfaceColor;
-  Color get foregroundColor;
-  Color get disabledColor;
-  Color get selectionColor;
-  Color get cursorColor;
-  TextStyle get paragraphStyle;
-  TextStyle get toolbarStyle;
-  double get spacingUnit;
-  double get borderRadius;
+/// Top-level configuration theme data wrapper for the editor.
+@immutable
+class EditorThemeData {
+  const EditorThemeData({
+    required this.theme,
+  });
+
+  final EditorTheme theme;
+
+  factory EditorThemeData.light() => EditorThemeData(theme: EditorTheme.light());
+  factory EditorThemeData.dark() => EditorThemeData(theme: EditorTheme.dark());
+  factory EditorThemeData.fromThemeData(ThemeData theme) =>
+      EditorThemeData(theme: EditorTheme.fromThemeData(theme));
+
+  EditorThemeData copyWith({EditorTheme? theme}) {
+    return EditorThemeData(theme: theme ?? this.theme);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EditorThemeData &&
+          runtimeType == other.runtimeType &&
+          theme == other.theme;
+
+  @override
+  int get hashCode => theme.hashCode;
 }

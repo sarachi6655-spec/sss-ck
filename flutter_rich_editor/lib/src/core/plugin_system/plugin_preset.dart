@@ -1,37 +1,39 @@
 import 'plugin.dart';
 
-/// Predefined plugin presets.
-///
-/// Presets do not silently enable network, AI, collaboration, or raw HTML
-/// capabilities. They only include features implemented by the registered
-/// plugin list passed to the preset function.
-abstract class PluginPresets {
-  /// Basic text editing: formatting + structure.
-  static List<EditorPlugin> basic(List<EditorPlugin> allPlugins) =>
-      allPlugins
-          .where((EditorPlugin p) =>
-              p.id.startsWith('formatting/') || p.id.startsWith('structure/'))
-          .toList();
+/// Predefined plugin bundles matching common use cases.
+enum PluginPresetKind {
+  basic,
+  media,
+  full,
+  custom,
+}
 
-  /// Basic + media features (images, video, links, embeds, tables, mentions,
-  /// emoji).
-  static List<EditorPlugin> media(List<EditorPlugin> allPlugins) =>
-      allPlugins
-          .where((EditorPlugin p) =>
-              p.id.startsWith('formatting/') ||
-              p.id.startsWith('structure/') ||
-              p.id.startsWith('media/'))
-          .toList();
+/// A bundle configuration for activating editor features.
+class PluginPreset {
+  const PluginPreset({
+    required this.kind,
+    this.customPlugins = const <EditorPlugin>[],
+  });
 
-  /// Full free-tier feature set. Does not include optional AI/collaboration
-  /// providers.
-  static List<EditorPlugin> full(List<EditorPlugin> allPlugins) =>
-      allPlugins
-          .where((EditorPlugin p) =>
-              !p.id.startsWith('providers/') &&
-              !p.id.startsWith('optional/'))
-          .toList();
+  const PluginPreset.basic() : this(kind: PluginPresetKind.basic);
+  const PluginPreset.media() : this(kind: PluginPresetKind.media);
+  const PluginPreset.full() : this(kind: PluginPresetKind.full);
+  const PluginPreset.custom(List<EditorPlugin> plugins)
+      : this(kind: PluginPresetKind.custom, customPlugins: plugins);
 
-  /// Caller-supplied list, validated for dependency ordering.
-  static List<EditorPlugin> custom(List<EditorPlugin> plugins) => plugins;
+  final PluginPresetKind kind;
+  final List<EditorPlugin> customPlugins;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is PluginPreset &&
+          runtimeType == other.runtimeType &&
+          kind == other.kind;
+
+  @override
+  int get hashCode => kind.hashCode;
+
+  @override
+  String toString() => 'PluginPreset($kind)';
 }

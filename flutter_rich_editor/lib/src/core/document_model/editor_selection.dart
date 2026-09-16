@@ -1,61 +1,104 @@
 import 'package:flutter/foundation.dart';
 
-/// Selection within the document.
-///
-/// [nodeId] identifies the selected node. For inline text selections
-/// [startOffset] and [endOffset] are byte/code-unit offsets into the node text.
-/// For block nodes, offsets are typically ignored.
+/// Represents a selection within an editor document or within a node.
 @immutable
 class EditorSelection {
-  final String? nodeId;
-  final int startOffset;
-  final int endOffset;
-  final bool isCollapsed;
+  const EditorSelection({
+    required this.baseOffset,
+    required this.extentOffset,
+    this.nodeIndex = 0,
+    this.endNodeIndex,
+  });
 
-  const EditorSelection.collapsed({
-    required this.nodeId,
-    required int offset,
-  })  : startOffset = offset,
-        endOffset = offset,
-        isCollapsed = true;
+  const EditorSelection.collapsed(int offset, {int nodeIndex = 0})
+      : this(
+          baseOffset: offset,
+          extentOffset: offset,
+          nodeIndex: nodeIndex,
+          endNodeIndex: nodeIndex,
+        );
 
-  const EditorSelection.range({
-    required this.nodeId,
-    required this.startOffset,
-    required this.endOffset,
-  }) : isCollapsed = false;
+  final int baseOffset;
+  final int extentOffset;
+  final int nodeIndex;
+  final int? endNodeIndex;
 
-  const EditorSelection.none()
-      : nodeId = null,
-        startOffset = 0,
-        endOffset = 0,
-        isCollapsed = true;
+  int get actualEndNodeIndex => endNodeIndex ?? nodeIndex;
 
-  bool get hasSelection => nodeId != null;
+  bool get isCollapsed =>
+      baseOffset == extentOffset && nodeIndex == actualEndNodeIndex;
+
+  int get start => baseOffset <= extentOffset ? baseOffset : extentOffset;
+  int get end => baseOffset <= extentOffset ? extentOffset : baseOffset;
+
+  int get startNodeIndex =>
+      nodeIndex <= actualEndNodeIndex ? nodeIndex : actualEndNodeIndex;
+  int get endNodeIndexNormalized =>
+      nodeIndex <= actualEndNodeIndex ? actualEndNodeIndex : nodeIndex;
+
+  EditorSelection normalized() {
+    if (baseOffset <= extentOffset && nodeIndex <= actualEndNodeIndex) {
+      return this;
+    }
+    return EditorSelection(
+      baseOffset: start,
+      extentOffset: end,
+      nodeIndex: startNodeIndex,
+      endNodeIndex: endNodeIndexNormalized,
+    );
+  }
 
   EditorSelection copyWith({
-    String? nodeId,
-    int? startOffset,
-    int? endOffset,
-    bool? isCollapsed,
-  }) =>
-      EditorSelection.range(
-        nodeId: nodeId ?? this.nodeId,
-        startOffset: startOffset ?? this.startOffset,
-        endOffset: endOffset ?? this.endOffset,
+    int? baseOffset,
+    int? extentOffset,
+    int? nodeIndex,
+    int? endNodeIndex,
+  }) {
+    return EditorSelection(
+      baseOffset: baseOffset ?? this.baseOffset,
+      extentOffset: extentOffset ?? this.extentOffset,
+      nodeIndex: nodeIndex ?? this.nodeIndex,
+      endNodeIndex: endNodeIndex ?? this.endNodeIndex,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'baseOffset': baseOffset,
+      'extentOffset': extentOffset,
+      'nodeIndex': nodeIndex,
+      'endNodeIndex': actualEndNodeIndex,
+    };
+  }
+
+  factory EditorSelection.fromJson(Map<String, dynamic> json) {
+    return EditorSelection(
+      baseOffset: (json['baseOffset'] as num?)?.toInt() ?? 0,
+      extentOffset: (json['extentOffset'] as num?)?.toInt() ?? 0,
+      nodeIndex: (json['nodeIndex'] as num?)?.toInt() ?? 0,
+      endNodeIndex: (json['endNodeIndex'] as num?)?.toInt(),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EditorSelection &&
+          runtimeType == other.runtimeType &&
+          baseOffset == other.baseOffset &&
+          extentOffset == other.extentOffset &&
+          nodeIndex == other.nodeIndex &&
+          actualEndNodeIndex == other.actualEndNodeIndex;
+
+  @override
+  int get hashCode => Object.hash(
+        baseOffset,
+        extentOffset,
+        nodeIndex,
+        actualEndNodeIndex,
       );
 
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        if (nodeId != null) 'nodeId': nodeId,
-        'startOffset': startOffset,
-        'endOffset': endOffset,
-        'isCollapsed': isCollapsed,
-      };
-
-  factory EditorSelection.fromJson(Map<String, dynamic> json) =>
-      EditorSelection.range(
-        nodeId: json['nodeId'] as String?,
-        startOffset: json['startOffset'] as int? ?? 0,
-        endOffset: json['endOffset'] as int? ?? 0,
-      );
+  @override
+  String toString() =>
+      'EditorSelection(node: $nodeIndex->$actualEndNodeIndex, offset: $baseOffset->$extentOffset)';
 }

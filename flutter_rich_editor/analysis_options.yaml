@@ -1,22 +1,20 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
-  exclude:
-    - "**/*.g.dart"
-    - "example/**"
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
   errors:
     missing_required_param: error
     missing_return: error
-    invalid_assignment: warning
+    todo: ignore
 
 linter:
   rules:
-    - prefer_final_locals
-    - prefer_const_constructors
-    - avoid_print
     - prefer_single_quotes
-    - avoid_unnecessary_containers
-    - use_super_parameters
-    - always_specify_types
-    - directives_ordering
-    - avoid_relative_lib_imports
+    - avoid_print
+    - prefer_final_locals
+    - unawaited_futures
+    - cancel_subscriptions
+    - close_sinks
