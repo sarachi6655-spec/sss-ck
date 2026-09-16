@@ -172,6 +172,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     #app-container {
       display: flex; flex-direction: column; width: 100%; height: 100%;
     }
+    #app-container.fullscreen-mode {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 2147483647 !important;
+      background: #ffffff !important;
+    }
+    body.dark #app-container.fullscreen-mode {
+      background: #1e1e2e !important;
+    }
     /* Custom action bar (above CKEditor toolbar) - Smooth horizontal touch scroll */
     #action-bar {
       display: flex; align-items: center; gap: 6px; padding: 6px 10px;
@@ -210,7 +222,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck.ck-toolbar { border: none !important; border-bottom: 1px solid #e2e8f0 !important; background: #f8fafc !important; padding: 2px 6px !important; flex-wrap: wrap !important; }
     .ck.ck-toolbar .ck-toolbar__separator { background: #e2e8f0 !important; }
     .ck.ck-editor__main { flex: 1 1 auto !important; overflow-y: auto !important; height: 0 !important; }
-    .ck-content { min-height: 100% !important; padding: 24px 32px !important; font-size: 15px !important; line-height: 1.7 !important; cursor: text !important; }
+    .ck-content { min-height: 100% !important; padding: 14px 20px !important; font-size: 15px !important; line-height: 1.7 !important; cursor: text !important; }
     .ck-content:focus { outline: none !important; }
     /* Heading Styles */
     .ck-content h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; color: #0f172a; }
@@ -741,6 +753,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   <div id="app-container">
     <!-- ==== ACTION BAR (Premium-like features) ==== -->
     <div id="action-bar">
+      <button onclick="toggleFullscreen()" id="btn-fullscreen" title="Toggle Fullscreen (Maximize Editor)" style="background:#eff6ff;color:#1d4ed8;font-weight:600;border-color:#bfdbfe;">⛶ Fullscreen</button>
+      <div class="separator"></div>
       <button onclick="exportToPDF()" title="Export to PDF">📄 PDF</button>
       <button onclick="exportToWord()" title="Export to Word">📝 Word</button>
       <button onclick="importFromWord()" title="Import from Word">📂 Import</button>
@@ -1017,6 +1031,55 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   </div>
 
   <script>
+    function toggleFullscreen() {
+      const container = document.getElementById('app-container');
+      const btn = document.getElementById('btn-fullscreen');
+      const isFull = container.classList.toggle('fullscreen-mode');
+      if (isFull) {
+        try {
+          if (container.requestFullscreen) {
+            container.requestFullscreen().catch(function() {});
+          } else if (container.webkitRequestFullscreen) {
+            container.webkitRequestFullscreen();
+          }
+        } catch(e) {}
+        if (btn) {
+          btn.innerHTML = '✕ Exit';
+          btn.style.background = '#fee2e2';
+          btn.style.color = '#b91c1c';
+          btn.style.borderColor = '#fca5a5';
+        }
+      } else {
+        try {
+          if (document.fullscreenElement && document.exitFullscreen) {
+            document.exitFullscreen().catch(function() {});
+          } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+            document.webkitExitFullscreen();
+          }
+        } catch(e) {}
+        if (btn) {
+          btn.innerHTML = '⛶ Fullscreen';
+          btn.style.background = '#eff6ff';
+          btn.style.color = '#1d4ed8';
+          btn.style.borderColor = '#bfdbfe';
+        }
+      }
+    }
+    document.addEventListener('fullscreenchange', function() {
+      const container = document.getElementById('app-container');
+      const btn = document.getElementById('btn-fullscreen');
+      const isFull = !!document.fullscreenElement;
+      if (container && !isFull) {
+        container.classList.remove('fullscreen-mode');
+      }
+      if (btn) {
+        btn.innerHTML = isFull ? '✕ Exit' : '⛶ Fullscreen';
+        btn.style.background = isFull ? '#fee2e2' : '#eff6ff';
+        btn.style.color = isFull ? '#b91c1c' : '#1d4ed8';
+        btn.style.borderColor = isFull ? '#fca5a5' : '#bfdbfe';
+      }
+    });
+
     /* ====== GLOBALS ====== */
     const EDITOR_ID = $editorIdJson;
     let initialContent = $initialJson;
