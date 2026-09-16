@@ -46,6 +46,9 @@ class DocumentValue {
     return buffer.toString();
   }
 
+  /// Convenience method for plain text extraction.
+  String toPlainText() => plainText;
+
   static String _extractText(EditorNode node) {
     if (node.text.isNotEmpty) {
       return node.text;

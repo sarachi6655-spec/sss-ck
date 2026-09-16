@@ -237,6 +237,21 @@ class RichEditorController extends ChangeNotifier {
     return _markdownCodec.encode(_document);
   }
 
+  /// Returns the combined plain text of the current document.
+  String toPlainText() {
+    _checkNotDisposed();
+    return _document.plainText;
+  }
+
+  /// Alias for [toPlainText], compatible with QuillController.pastePlainText.
+  String get pastePlainText => toPlainText();
+
+  /// Whether the document has no content.
+  bool get isEmpty => _document.isEmpty;
+
+  /// Whether the document has content.
+  bool get isNotEmpty => _document.isNotEmpty;
+
   @override
   void dispose() {
     if (!_isDisposed) {
