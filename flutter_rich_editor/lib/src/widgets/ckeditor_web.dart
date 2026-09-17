@@ -273,22 +273,25 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content table td[data-formula], .ck-content table th[data-formula] {
       position: relative !important;
       background-color: #f8faff !important;
+      padding-right: 24px !important;
     }
     .formula-badge {
+      position: absolute !important;
+      top: 3px !important;
+      right: 3px !important;
+      z-index: 5 !important;
       display: inline-flex !important;
       align-items: center !important;
       justify-content: center !important;
       font-size: 10px !important;
       line-height: 1 !important;
-      padding: 2px 5px !important;
+      padding: 2px 4px !important;
       background: #eff6ff !important;
       color: #1d4ed8 !important;
       border: 1px solid #93c5fd !important;
       border-radius: 4px !important;
       font-weight: 700 !important;
-      margin-left: 6px !important;
       user-select: none !important;
-      vertical-align: middle !important;
       cursor: pointer !important;
       box-shadow: 0 1px 2px rgba(37, 99, 235, 0.1) !important;
       transition: all 0.15s ease !important;
@@ -1318,7 +1321,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
   <!-- ==== FORMULA HELP & EDITOR MODAL ==== -->
   <div class="modal-overlay" id="formula-modal">
-    <div class="modal-box" style="max-width:580px;">
+    <div class="modal-box" style="max-width:580px;max-height:min(90vh,90dvh);overflow-y:auto;">
       <button class="close-modal" onclick="closeFormulaHelpModal()">&times;</button>
       <h2 id="formula-modal-title">🧮 Table Formula Editor</h2>
       
@@ -2586,9 +2589,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               const cell = cells[c];
               const regKey = tIdx + '_' + r + '_' + c;
               let formula = null;
-              if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-                formula = window._tableFormulaRegistry[regKey];
-              } else if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
+              if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
                 const liveC = liveT.rows[r].cells[c];
                 formula = liveC.getAttribute('data-formula') || extractFormulaFromTitle(liveC.getAttribute('title'));
                 if (!formula) {
@@ -2599,10 +2600,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                   const childT = liveC.querySelector('[title*="Formula:"]');
                   if (childT) formula = extractFormulaFromTitle(childT.getAttribute('title'));
                 }
-              } else if (cell.getAttribute('data-formula')) {
+              }
+              if (!formula && cell.getAttribute('data-formula')) {
                 formula = cell.getAttribute('data-formula');
-              } else if (cell.getAttribute('title')) {
+              }
+              if (!formula && cell.getAttribute('title')) {
                 formula = extractFormulaFromTitle(cell.getAttribute('title'));
+              }
+              if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
+                if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
+                  const liveC = liveT.rows[r].cells[c];
+                  if (liveC.classList.contains('has-formula') || liveC.hasAttribute('data-formula')) {
+                    formula = window._tableFormulaRegistry[regKey];
+                  }
+                }
               }
 
               // Strip accidental 'fx' suffix from cell text
@@ -2656,7 +2667,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         const tables = doc.querySelectorAll('table');
-        window._tableFormulaRegistry = window._tableFormulaRegistry || {};
+        window._tableFormulaRegistry = {};
         tables.forEach((t, tIdx) => {
           for (let r = 0; r < t.rows.length; r++) {
             for (let c = 0; c < t.rows[r].cells.length; c++) {
@@ -2915,142 +2926,179 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       expr = expr.split('(').map(function(s) { return s.trimEnd(); }).join('(').split(')').map(function(s) { return s.trimStart(); }).join(')');
 
       // 1. SUM(ABOVE), SUM(UP), SUM()
-      expr = expr.replace(/SUM\\((?:ABOVE|UP)?\\)/gi, () => {
+      expr = expr.replace(/SUM\\(\\s*(?:ABOVE|UP)?\\s*\\)/gi, () => {
         const vals = getAboveValues();
         return vals.reduce((a, b) => a + b, 0);
       });
 
       // 2. AVG(ABOVE), AVERAGE(ABOVE)
-      expr = expr.replace(/(?:AVG|AVERAGE)\\((?:ABOVE|UP)?\\)/gi, () => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(\\s*(?:ABOVE|UP)?\\s*\\)/gi, () => {
         const vals = getAboveValues();
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
 
       // 3. MIN(ABOVE)
-      expr = expr.replace(/MIN\\((?:ABOVE|UP)?\\)/gi, () => {
+      expr = expr.replace(/MIN\\(\\s*(?:ABOVE|UP)?\\s*\\)/gi, () => {
         const vals = getAboveValues();
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
 
       // 4. MAX(ABOVE)
-      expr = expr.replace(/MAX\\((?:ABOVE|UP)?\\)/gi, () => {
+      expr = expr.replace(/MAX\\(\\s*(?:ABOVE|UP)?\\s*\\)/gi, () => {
         const vals = getAboveValues();
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
 
       // 5. COUNT(ABOVE)
-      expr = expr.replace(/COUNT\\((?:ABOVE|UP)?\\)/gi, () => {
+      expr = expr.replace(/COUNT\\(\\s*(?:ABOVE|UP)?\\s*\\)/gi, () => {
         return getAboveValues().length;
       });
 
       // 6. SUM(LEFT)
-      expr = expr.replace(/SUM\\(LEFT\\)/gi, () => {
+      expr = expr.replace(/SUM\\(\\s*LEFT\\s*\\)/gi, () => {
         const vals = getLeftValues();
         return vals.reduce((a, b) => a + b, 0);
       });
 
       // 6a. AVG(LEFT), AVERAGE(LEFT)
-      expr = expr.replace(/(?:AVG|AVERAGE)\\(LEFT\\)/gi, () => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(\\s*LEFT\\s*\\)/gi, () => {
         const vals = getLeftValues();
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
 
       // 6b. MIN(LEFT), MAX(LEFT), COUNT(LEFT)
-      expr = expr.replace(/MIN\\(LEFT\\)/gi, () => {
+      expr = expr.replace(/MIN\\(\\s*LEFT\\s*\\)/gi, () => {
         const vals = getLeftValues();
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
-      expr = expr.replace(/MAX\\(LEFT\\)/gi, () => {
+      expr = expr.replace(/MAX\\(\\s*LEFT\\s*\\)/gi, () => {
         const vals = getLeftValues();
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
-      expr = expr.replace(/COUNT\\(LEFT\\)/gi, () => {
+      expr = expr.replace(/COUNT\\(\\s*LEFT\\s*\\)/gi, () => {
         return getLeftValues().length;
       });
 
       // 6c. Directional RIGHT functions
-      expr = expr.replace(/SUM\\(RIGHT\\)/gi, () => {
+      expr = expr.replace(/SUM\\(\\s*RIGHT\\s*\\)/gi, () => {
         const vals = getRightValues();
         return vals.reduce((a, b) => a + b, 0);
       });
-      expr = expr.replace(/(?:AVG|AVERAGE)\\(RIGHT\\)/gi, () => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(\\s*RIGHT\\s*\\)/gi, () => {
         const vals = getRightValues();
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
-      expr = expr.replace(/MIN\\(RIGHT\\)/gi, () => {
+      expr = expr.replace(/MIN\\(\\s*RIGHT\\s*\\)/gi, () => {
         const vals = getRightValues();
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
-      expr = expr.replace(/MAX\\(RIGHT\\)/gi, () => {
+      expr = expr.replace(/MAX\\(\\s*RIGHT\\s*\\)/gi, () => {
         const vals = getRightValues();
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
-      expr = expr.replace(/COUNT\\(RIGHT\\)/gi, () => {
+      expr = expr.replace(/COUNT\\(\\s*RIGHT\\s*\\)/gi, () => {
         return getRightValues().length;
       });
 
       // 6d. Directional BELOW / DOWN functions
-      expr = expr.replace(/SUM\\((?:BELOW|DOWN)\\)/gi, () => {
+      expr = expr.replace(/SUM\\(\\s*(?:BELOW|DOWN)\\s*\\)/gi, () => {
         const vals = getBelowValues();
         return vals.reduce((a, b) => a + b, 0);
       });
-      expr = expr.replace(/(?:AVG|AVERAGE)\\((?:BELOW|DOWN)\\)/gi, () => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(\\s*(?:BELOW|DOWN)\\s*\\)/gi, () => {
         const vals = getBelowValues();
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
-      expr = expr.replace(/MIN\\((?:BELOW|DOWN)\\)/gi, () => {
+      expr = expr.replace(/MIN\\(\\s*(?:BELOW|DOWN)\\s*\\)/gi, () => {
         const vals = getBelowValues();
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
-      expr = expr.replace(/MAX\\((?:BELOW|DOWN)\\)/gi, () => {
+      expr = expr.replace(/MAX\\(\\s*(?:BELOW|DOWN)\\s*\\)/gi, () => {
         const vals = getBelowValues();
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
-      expr = expr.replace(/COUNT\\((?:BELOW|DOWN)\\)/gi, () => {
+      expr = expr.replace(/COUNT\\(\\s*(?:BELOW|DOWN)\\s*\\)/gi, () => {
         return getBelowValues().length;
       });
 
       // 7. SUM(A1:A2) or SUM(A1..A2)
-      expr = expr.replace(/SUM\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/SUM\\(\\s*([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\s*\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.reduce((a, b) => a + b, 0);
       });
 
       // 8. AVG(A1:A2)
-      expr = expr.replace(/(?:AVG|AVERAGE)\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(\\s*([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\s*\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
 
       // 9. MIN(A1:A2)
-      expr = expr.replace(/MIN\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/MIN\\(\\s*([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\s*\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
 
       // 10. MAX(A1:A2)
-      expr = expr.replace(/MAX\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/MAX\\(\\s*([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\s*\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
 
       // 11. COUNT(A1:A2)
-      expr = expr.replace(/COUNT\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/COUNT\\(\\s*([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\s*\\)/gi, (m, c1, c2) => {
         return getRangeValues(c1, c2).length;
       });
 
-      // 12. SUM(A1, A2) or SUM(A1 + A2)
+      // 12. Helper for comma-separated arguments: SUM(A1, A2, 10), AVG(A1, B1), etc.
+      const parseCommaVals = (inner) => {
+        const parts = inner.split(',');
+        const vals = [];
+        for (let i = 0; i < parts.length; i++) {
+          const p = parts[i].trim();
+          const coord = parseCellCoord(p);
+          if (coord) vals.push(getCellValue(p));
+          else { const n = parseFloat(p); if (!isNaN(n)) vals.push(n); }
+        }
+        return vals;
+      };
+
       expr = expr.replace(/SUM\\(([^)]+)\\)/gi, (m, inner) => {
         if (inner.indexOf(',') !== -1) {
-          const parts = inner.split(',');
-          let sum = 0;
-          for (let i = 0; i < parts.length; i++) {
-            const p = parts[i].trim();
-            const coord = parseCellCoord(p);
-            if (coord) sum += getCellValue(p);
-            else { const n = parseFloat(p); if (!isNaN(n)) sum += n; }
-          }
-          return sum;
+          const vals = parseCommaVals(inner);
+          return vals.reduce((a, b) => a + b, 0);
+        }
+        return '(' + inner + ')';
+      });
+
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(([^)]+)\\)/gi, (m, inner) => {
+        if (inner.indexOf(',') !== -1) {
+          const vals = parseCommaVals(inner);
+          return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+        }
+        return '(' + inner + ')';
+      });
+
+      expr = expr.replace(/MIN\\(([^)]+)\\)/gi, (m, inner) => {
+        if (inner.indexOf(',') !== -1) {
+          const vals = parseCommaVals(inner);
+          return vals.length > 0 ? Math.min.apply(null, vals) : 0;
+        }
+        return '(' + inner + ')';
+      });
+
+      expr = expr.replace(/MAX\\(([^)]+)\\)/gi, (m, inner) => {
+        if (inner.indexOf(',') !== -1) {
+          const vals = parseCommaVals(inner);
+          return vals.length > 0 ? Math.max.apply(null, vals) : 0;
+        }
+        return '(' + inner + ')';
+      });
+
+      expr = expr.replace(/COUNT\\(([^)]+)\\)/gi, (m, inner) => {
+        if (inner.indexOf(',') !== -1) {
+          const vals = parseCommaVals(inner);
+          return vals.length;
         }
         return '(' + inner + ')';
       });
@@ -3228,6 +3276,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     function scanAndRegisterTableFormulas() {
       const liveTables = getEditorLiveTables();
+      // Reset formula registry so dead keys from old tables/rows never leak
+      window._tableFormulaRegistry = {};
+
       liveTables.forEach((table, tableIdx) => {
         const rows = table.rows;
         if (!rows) return;
@@ -3244,19 +3295,27 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             const cleanTxt = cleanFormulaText(rawText);
 
             const hasBadge = !!cell.querySelector('.formula-badge');
-            const hadFormula = !!(window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) ||
-                               (cell.getAttribute && !!cell.getAttribute('data-formula')) ||
-                               cell.classList.contains('has-formula');
 
-            let formula = null;
-            if (cleanTxt.startsWith('=')) {
-              // User explicitly typed or kept a formula starting with =
-              formula = cleanTxt;
-            } else if (hadFormula && !hasBadge && !cleanTxt.startsWith('=')) {
-              // User cleared the formula cell or replaced it with a static number/text!
-              if (window._tableFormulaRegistry) {
-                delete window._tableFormulaRegistry[regKey];
+            // Find formula from attributes or children
+            let attrFormula = cell.getAttribute ? cell.getAttribute('data-formula') : null;
+            if (!attrFormula && cell.getAttribute && cell.getAttribute('title')) {
+              attrFormula = extractFormulaFromTitle(cell.getAttribute('title'));
+            }
+            if (!attrFormula && cell.querySelector) {
+              const elF = cell.querySelector('[data-formula]');
+              if (elF) {
+                attrFormula = elF.getAttribute('data-formula');
+              } else {
+                const withTitle = cell.querySelector('[title*="Formula:"]');
+                if (withTitle) attrFormula = extractFormulaFromTitle(withTitle.getAttribute('title'));
               }
+            }
+
+            // CRITICAL GUARD AGAINST CLONED ATTRIBUTES:
+            // When CKEditor inserts a row or column, it clones attributes (including dataFormula).
+            // If the cell is completely empty/blank (no badge, blank text, no typed formula):
+            // Strip the cloned attribute immediately so newly inserted rows/cols stay clean!
+            if (attrFormula && !hasBadge && rawText === '' && !cleanTxt.startsWith('=')) {
               if (cell.removeAttribute) {
                 cell.removeAttribute('data-formula');
                 cell.removeAttribute('title');
@@ -3264,28 +3323,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               }
               const b = cell.querySelector('.formula-badge');
               if (b) b.remove();
-              const s = cell.querySelector('strong');
-              if (s) s.removeAttribute('data-formula');
               if (editorInstance && editorInstance.model) {
                 _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
               }
-              formula = null;
-            } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
-              formula = cleanFormulaText(cell.getAttribute('data-formula'));
-            } else if (cell.getAttribute && cell.getAttribute('title')) {
-              formula = extractFormulaFromTitle(cell.getAttribute('title'));
-            } else if (cell.querySelector) {
-              const elF = cell.querySelector('[data-formula]');
-              if (elF) {
-                formula = cleanFormulaText(elF.getAttribute('data-formula'));
-              } else {
-                const withTitle = cell.querySelector('[title*="Formula:"]');
-                if (withTitle) formula = extractFormulaFromTitle(withTitle.getAttribute('title'));
-              }
+              continue;
             }
 
-            if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-              formula = window._tableFormulaRegistry[regKey];
+            let formula = null;
+            if (cleanTxt.startsWith('=')) {
+              // User explicitly typed or kept a formula starting with =
+              formula = cleanTxt;
+            } else if (attrFormula) {
+              formula = cleanFormulaText(attrFormula);
             }
 
             if (formula && formula.startsWith('=')) {
@@ -3351,7 +3400,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
       }
       if (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-        return window._tableFormulaRegistry[regKey];
+        if (cell && (cell.classList.contains('has-formula') || (cell.getAttribute && cell.getAttribute('data-formula')))) {
+          return window._tableFormulaRegistry[regKey];
+        }
       }
       return null;
     }
@@ -3432,7 +3483,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
-    function autoUpdateTableFormulasDOM() {
+    function autoUpdateTableFormulasDOM(forceCell = null) {
       if (window._isUpdatingFormula) return;
       const liveTables = getEditorLiveTables();
       if (liveTables.length === 0) return;
@@ -3477,8 +3528,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             for (let r = 0; r < liveRows.length; r++) {
               for (let c = 0; c < liveRows[r].cells.length; c++) {
                 const liveCell = liveRows[r].cells[c];
-                // CRITICAL: Protect the active cell currently being edited/typed in!
-                if (liveCell.contains(document.activeElement)) {
+                // CRITICAL: Protect the active cell currently being edited/typed in unless explicitly forced
+                if (liveCell !== forceCell && liveCell.contains(document.activeElement)) {
                   continue;
                 }
                 const formula = getCellFormula(liveCell, tableIdx, r, c);
@@ -3508,8 +3559,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     }
                     strong.setAttribute('data-formula', formula);
 
-                    // Ensure interactive .formula-badge is present in live editor DOM
-                    let badge = p.querySelector('.formula-badge') || liveCell.querySelector('.formula-badge');
+                    // Ensure interactive .formula-badge is attached directly to liveCell (td/th), NOT inside <p>
+                    const oldPBadge = p.querySelector('.formula-badge');
+                    if (oldPBadge) oldPBadge.remove();
+
+                    let badge = liveCell.querySelector(':scope > .formula-badge');
                     if (!badge) {
                       badge = document.createElement('span');
                       badge.className = 'formula-badge';
@@ -3517,11 +3571,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                       badge.setAttribute('data-formula', formula);
                       badge.title = 'Formula: ' + formula + ' (Click to edit)';
                       badge.textContent = 'fx';
-                      p.appendChild(badge);
+                      liveCell.appendChild(badge);
                     } else {
                       badge.setAttribute('data-formula', formula);
                       badge.title = 'Formula: ' + formula + ' (Click to edit)';
-                      if (badge.parentElement !== p) p.appendChild(badge);
                     }
 
                     // Update grid so chained formulas work instantly
@@ -3728,7 +3781,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       window._tableFormulaRegistry[regKey] = formula;
 
       closeFormulaHelpModal();
-      autoUpdateTableFormulasDOM();
+      autoUpdateTableFormulasDOM(cell);
       showToastMsg('⚡ Formula applied: ' + formula);
       postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
     }
