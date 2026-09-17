@@ -230,7 +230,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     /* ====== CKEDITOR CUSTOMIZATION ====== */
     .ck.ck-editor { display: flex !important; flex-direction: column !important; height: 100% !important; width: 100% !important; border: none !important; border-radius: 0 !important; }
     .ck.ck-editor__top { flex-shrink: 0 !important; }
-    .ck.ck-toolbar { border: none !important; border-bottom: 1px solid #e2e8f0 !important; background: #f8fafc !important; padding: 2px 6px !important; flex-wrap: nowrap !important; overflow-x: visible !important; }
+    .ck.ck-toolbar { border: none !important; border-bottom: 1px solid #e2e8f0 !important; background: #f8fafc !important; padding: 3px 6px !important; flex-wrap: wrap !important; overflow: visible !important; }
+    .ck.ck-toolbar .ck-toolbar__items { flex-wrap: wrap !important; overflow: visible !important; }
     .ck.ck-toolbar .ck-toolbar__separator { background: #e2e8f0 !important; }
     .ck.ck-editor__main { flex: 1 1 auto !important; overflow-y: auto !important; height: 0 !important; }
     .ck-content { min-height: 100% !important; padding: 14px 20px !important; font-size: 15px !important; line-height: 1.7 !important; cursor: text !important; }
@@ -621,23 +622,22 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     body.dark #fallback-content { background: #181825; color: #cdd6f4; }
 
 
-    /* ====== DROPDOWN OVERFLOW & MAX-HEIGHT FIX ====== */
+    /* ====== DROPDOWN OVERFLOW & TABLE GRID FIX ====== */
     .ck.ck-dropdown__panel,
     .ck-dropdown__panel {
-      max-height: min(280px, calc(100vh - 120px)) !important;
-      overflow-y: auto !important;
-      overflow-x: hidden !important;
-      -webkit-overflow-scrolling: touch !important;
+      max-height: min(440px, calc(100vh - 100px)) !important;
+      overflow: visible !important;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
       border-radius: 8px !important;
-      scrollbar-width: thin !important;
+      z-index: 1000 !important;
     }
     .ck.ck-dropdown__panel .ck-list,
     .ck-dropdown__panel .ck-list {
-      max-height: inherit !important;
+      max-height: min(300px, calc(100vh - 140px)) !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
       -webkit-overflow-scrolling: touch !important;
+      scrollbar-width: thin !important;
     }
     .ck.ck-dropdown__panel::-webkit-scrollbar,
     .ck-dropdown__panel::-webkit-scrollbar,
@@ -664,6 +664,49 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck.ck-list::-webkit-scrollbar-thumb:hover,
     .ck-list::-webkit-scrollbar-thumb:hover {
       background: rgba(100, 116, 139, 0.9) !important;
+    }
+
+    /* Table insertion grid popup - NEVER clip horizontally or vertically */
+    .ck.ck-insert-table-dropdown .ck-dropdown__panel,
+    .ck-insert-table-dropdown .ck-dropdown__panel,
+    .ck.ck-dropdown__panel:has(.ck-table-grid),
+    .ck.ck-dropdown__panel:has(.ck-insert-table-dropdown-grid) {
+      max-height: none !important;
+      height: auto !important;
+      width: auto !important;
+      max-width: none !important;
+      min-width: 230px !important;
+      overflow: visible !important;
+      overflow-x: visible !important;
+      overflow-y: visible !important;
+    }
+    .ck-table-grid,
+    .ck-insert-table-dropdown-grid {
+      overflow: visible !important;
+      width: auto !important;
+      padding: 8px !important;
+    }
+    .ck-table-grid__tiles,
+    .ck-insert-table-dropdown-grid-tiles {
+      overflow: visible !important;
+      display: grid !important;
+    }
+    .ck-table-grid__label {
+      padding: 6px 4px 2px !important;
+      text-align: center !important;
+      font-size: 12px !important;
+      font-weight: 500 !important;
+    }
+
+    /* Nested dropdowns inside grouped dropdown or split buttons */
+    .ck-toolbar__grouped-dropdown .ck-dropdown__panel {
+      overflow: visible !important;
+      max-height: min(440px, calc(100vh - 100px)) !important;
+    }
+    .ck-toolbar__grouped-dropdown .ck-dropdown__panel .ck-dropdown__panel {
+      position: absolute !important;
+      z-index: 1001 !important;
+      overflow: visible !important;
     }
 
     /* Balloon Panels (Table Toolbar, Link Balloon, etc.) */
@@ -1042,71 +1085,75 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
   <!-- ==== TABLE COLOR & STYLING MODAL ==== -->
   <div class="modal-overlay" id="table-color-modal">
-    <div class="modal-box" style="max-width:540px;">
-      <button class="close-modal" onclick="closeTableColorModal()">&times;</button>
-      <h2>🎨 Table Styling & Color</h2>
-      <p style="margin-bottom:12px;color:#64748b;font-size:12px;">Apply background colors, text colors, and borders to table cells, columns, rows, or the entire table.</p>
+    <div class="modal-box" style="max-width:520px;max-height:min(90vh,90dvh);overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #e2e8f0;padding-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <h2 style="font-size:16px;margin:0;color:#0f172a;">🎨 Table Styling & Color</h2>
+          <span id="tbl-color-target-info" style="font-size:11px;background:#eff6ff;color:#1d4ed8;padding:2px 8px;border-radius:12px;font-weight:600;border:1px solid #bfdbfe;">Active Table</span>
+        </div>
+        <button class="close-modal" onclick="closeTableColorModal()" style="font-size:20px;padding:0 4px;line-height:1;">&times;</button>
+      </div>
 
       <!-- Target Selection -->
-      <div style="margin-bottom:14px;">
-        <label style="font-weight:600;font-size:12px;display:block;margin-bottom:6px;color:#334155;">1. Choose Target:</label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;">
-          <button type="button" class="tbl-target-btn active" data-target="cell" onclick="setTableColorTarget('cell')">🔲 Current Cell</button>
-          <button type="button" class="tbl-target-btn" data-target="col" onclick="setTableColorTarget('col')">🏛️ Entire Column</button>
-          <button type="button" class="tbl-target-btn" data-target="row" onclick="setTableColorTarget('row')">➖ Entire Row</button>
-          <button type="button" class="tbl-target-btn" data-target="table" onclick="setTableColorTarget('table')">📊 Entire Table</button>
-          <button type="button" class="tbl-target-btn" data-target="header" onclick="setTableColorTarget('header')">🏷️ Header Row</button>
-          <button type="button" class="tbl-target-btn" data-target="zebra" onclick="setTableColorTarget('zebra')">🦓 Zebra Stripes</button>
+      <div>
+        <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:5px;color:#334155;">1. Choose Target:</label>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          <button type="button" class="tbl-target-btn active" data-target="cell" onclick="setTableColorTarget('cell')" style="padding:4px 9px;font-size:11.5px;">🔲 Current Cell</button>
+          <button type="button" class="tbl-target-btn" data-target="col" onclick="setTableColorTarget('col')" style="padding:4px 9px;font-size:11.5px;">🏛️ Entire Column</button>
+          <button type="button" class="tbl-target-btn" data-target="row" onclick="setTableColorTarget('row')" style="padding:4px 9px;font-size:11.5px;">➖ Entire Row</button>
+          <button type="button" class="tbl-target-btn" data-target="table" onclick="setTableColorTarget('table')" style="padding:4px 9px;font-size:11.5px;">📊 Entire Table</button>
+          <button type="button" class="tbl-target-btn" data-target="header" onclick="setTableColorTarget('header')" style="padding:4px 9px;font-size:11.5px;">🏷️ Header Row</button>
+          <button type="button" class="tbl-target-btn" data-target="zebra" onclick="setTableColorTarget('zebra')" style="padding:4px 9px;font-size:11.5px;">🦓 Zebra Stripes</button>
         </div>
       </div>
 
       <!-- Color Presets -->
-      <div style="margin-bottom:14px;">
-        <label style="font-weight:600;font-size:12px;display:block;margin-bottom:6px;color:#334155;">2. Select Background Color:</label>
-        <div class="color-swatch-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(42px, 1fr));gap:6px;">
-          <button type="button" class="color-swatch" style="background:#ffffff;border:1px solid #cbd5e1;" title="Clear / White" onclick="applyPresetBg('#ffffff', '#1e293b')"></button>
-          <button type="button" class="color-swatch" style="background:#eff6ff;border:1px solid #bfdbfe;" title="Soft Blue" onclick="applyPresetBg('#eff6ff', '#1e40af')"></button>
-          <button type="button" class="color-swatch" style="background:#f0fdf4;border:1px solid #bbf7d0;" title="Soft Green" onclick="applyPresetBg('#f0fdf4', '#166534')"></button>
-          <button type="button" class="color-swatch" style="background:#fefce8;border:1px solid #fef08a;" title="Soft Yellow" onclick="applyPresetBg('#fefce8', '#854d0e')"></button>
-          <button type="button" class="color-swatch" style="background:#faf5ff;border:1px solid #e9d5ff;" title="Soft Purple" onclick="applyPresetBg('#faf5ff', '#6b21a8')"></button>
-          <button type="button" class="color-swatch" style="background:#fef2f2;border:1px solid #fecaca;" title="Soft Red" onclick="applyPresetBg('#fef2f2', '#991b1b')"></button>
-          <button type="button" class="color-swatch" style="background:#f1f5f9;border:1px solid #cbd5e1;" title="Slate Gray" onclick="applyPresetBg('#f1f5f9', '#0f172a')"></button>
-          <button type="button" class="color-swatch" style="background:#e0e7ff;border:1px solid #c7d2fe;" title="Indigo Light" onclick="applyPresetBg('#e0e7ff', '#3730a3')"></button>
-          <button type="button" class="color-swatch" style="background:#ccfbf1;border:1px solid #99f6e4;" title="Teal Light" onclick="applyPresetBg('#ccfbf1', '#115e59')"></button>
-          <button type="button" class="color-swatch" style="background:#ffedd5;border:1px solid #fed7aa;" title="Orange Light" onclick="applyPresetBg('#ffedd5', '#9a3412')"></button>
-          <button type="button" class="color-swatch" style="background:#2563eb;border:1px solid #1d4ed8;" title="Royal Blue" onclick="applyPresetBg('#2563eb', '#ffffff')"></button>
-          <button type="button" class="color-swatch" style="background:#1e293b;border:1px solid #0f172a;" title="Dark Slate" onclick="applyPresetBg('#1e293b', '#ffffff')"></button>
+      <div>
+        <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:5px;color:#334155;">2. Select Background Color:</label>
+        <div class="color-swatch-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(36px, 1fr));gap:5px;">
+          <button type="button" class="color-swatch" style="height:26px;background:#ffffff;border:1px solid #cbd5e1;" title="Clear / White" onclick="applyPresetBg('#ffffff', '#1e293b')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#eff6ff;border:1px solid #bfdbfe;" title="Soft Blue" onclick="applyPresetBg('#eff6ff', '#1e40af')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#f0fdf4;border:1px solid #bbf7d0;" title="Soft Green" onclick="applyPresetBg('#f0fdf4', '#166534')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#fefce8;border:1px solid #fef08a;" title="Soft Yellow" onclick="applyPresetBg('#fefce8', '#854d0e')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#faf5ff;border:1px solid #e9d5ff;" title="Soft Purple" onclick="applyPresetBg('#faf5ff', '#6b21a8')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#fef2f2;border:1px solid #fecaca;" title="Soft Red" onclick="applyPresetBg('#fef2f2', '#991b1b')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#f1f5f9;border:1px solid #cbd5e1;" title="Slate Gray" onclick="applyPresetBg('#f1f5f9', '#0f172a')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#e0e7ff;border:1px solid #c7d2fe;" title="Indigo Light" onclick="applyPresetBg('#e0e7ff', '#3730a3')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#ccfbf1;border:1px solid #99f6e4;" title="Teal Light" onclick="applyPresetBg('#ccfbf1', '#115e59')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#ffedd5;border:1px solid #fed7aa;" title="Orange Light" onclick="applyPresetBg('#ffedd5', '#9a3412')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#2563eb;border:1px solid #1d4ed8;" title="Royal Blue" onclick="applyPresetBg('#2563eb', '#ffffff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#1e293b;border:1px solid #0f172a;" title="Dark Slate" onclick="applyPresetBg('#1e293b', '#ffffff')"></button>
         </div>
-        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;">
-          <label style="font-size:12px;color:#475569;">Custom Color:</label>
-          <input type="color" id="tbl-custom-bg" value="#3b82f6" style="width:36px;height:30px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyCustomBg(this.value)">
-          <button type="button" onclick="clearTableBg()" style="padding:4px 10px;font-size:11px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Clear Background</button>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <label style="font-size:11.5px;color:#475569;font-weight:500;">Custom:</label>
+          <input type="color" id="tbl-custom-bg" value="#3b82f6" style="width:34px;height:26px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyCustomBg(this.value)">
+          <button type="button" onclick="clearTableBg()" style="padding:3px 8px;font-size:11px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Clear Background</button>
         </div>
       </div>
 
       <!-- Border Color & Text Color Options -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
         <div>
-          <label style="font-weight:600;font-size:12px;display:block;margin-bottom:4px;color:#334155;">Border Color:</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="color" id="tbl-border-color" value="#cbd5e1" style="width:36px;height:30px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyBorderColor(this.value)">
-            <button type="button" onclick="applyBorderColor('#cbd5e1')" style="padding:4px 8px;font-size:11px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Default</button>
-            <button type="button" onclick="applyBorderColor('#3b82f6')" style="padding:4px 8px;font-size:11px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:4px;cursor:pointer;">Blue</button>
+          <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:4px;color:#334155;">Border Color:</label>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <input type="color" id="tbl-border-color" value="#cbd5e1" style="width:32px;height:24px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyBorderColor(this.value)">
+            <button type="button" onclick="applyBorderColor('#cbd5e1')" style="padding:2px 6px;font-size:10.5px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Default</button>
+            <button type="button" onclick="applyBorderColor('#3b82f6')" style="padding:2px 6px;font-size:10.5px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:4px;cursor:pointer;">Blue</button>
           </div>
         </div>
         <div>
-          <label style="font-weight:600;font-size:12px;display:block;margin-bottom:4px;color:#334155;">Text Color:</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="color" id="tbl-text-color" value="#0f172a" style="width:36px;height:30px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyTextColor(this.value)">
-            <button type="button" onclick="applyTextColor('#0f172a')" style="padding:4px 8px;font-size:11px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Dark</button>
-            <button type="button" onclick="applyTextColor('#ffffff')" style="padding:4px 8px;font-size:11px;border:1px solid #475569;background:#1e293b;color:#fff;border-radius:4px;cursor:pointer;">White</button>
+          <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:4px;color:#334155;">Text Color:</label>
+          <div style="display:flex;align-items:center;gap:5px;">
+            <input type="color" id="tbl-text-color" value="#0f172a" style="width:32px;height:24px;padding:1px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;" onchange="applyTextColor(this.value)">
+            <button type="button" onclick="applyTextColor('#0f172a')" style="padding:2px 6px;font-size:10.5px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Dark</button>
+            <button type="button" onclick="applyTextColor('#ffffff')" style="padding:2px 6px;font-size:10.5px;border:1px solid #475569;background:#1e293b;color:#fff;border-radius:4px;cursor:pointer;">White</button>
           </div>
         </div>
       </div>
 
-      <div class="modal-actions" style="justify-content:space-between;align-items:center;">
-        <button type="button" onclick="harmonizeActiveTable()" style="padding:6px 12px;background:#f0fdf4;color:#166534;border:1px solid #86efac;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:4px;">🧹 Harmonize Table (Match Document Style)</button>
-        <button class="primary-btn" onclick="closeTableColorModal()">Done</button>
+      <div class="modal-actions" style="margin-top:4px;padding-top:8px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+        <button type="button" onclick="harmonizeActiveTable()" style="padding:5px 10px;background:#f0fdf4;color:#166534;border:1px solid #86efac;border-radius:6px;font-size:11.5px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:4px;">🧹 Harmonize Table</button>
+        <button class="primary-btn" onclick="closeTableColorModal()" style="padding:5px 16px;font-size:12px;">Done</button>
       </div>
     </div>
   </div>
@@ -1279,7 +1326,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               'sourceEditing', 'showBlocks', '|',
               'textPartLanguage', 'accessibilityHelp'
             ],
-            shouldNotGroupWhenFull: false
+            shouldNotGroupWhenFull: true
           },
           removePlugins: [
             'CKBox', 'CKBoxImageEdit', 'CKBoxUtils', 'CKFinder', 'EasyImage',
@@ -1502,7 +1549,14 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         .then(editor => {
           editorInstance = editor;
           window.editorInstance = editor;
-          if (initialContent) editor.setData(initialContent);
+          if (initialContent) {
+            extractAndSeedFormulasFromHtml(initialContent);
+            editor.setData(initialContent);
+            setTimeout(() => {
+              scanAndRegisterTableFormulas();
+              evaluateAllTableFormulas(false);
+            }, 100);
+          }
 
           /* Set up Base64 image upload adapter */
           editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
@@ -2165,7 +2219,43 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       return injectFormulasIntoHtml(data);
     }
 
+    function extractAndSeedFormulasFromHtml(html) {
+      try {
+        if (!html || html.indexOf('<table') === -1) return;
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const tables = doc.querySelectorAll('table');
+        window._tableFormulaRegistry = window._tableFormulaRegistry || {};
+        tables.forEach((t, tIdx) => {
+          for (let r = 0; r < t.rows.length; r++) {
+            for (let c = 0; c < t.rows[r].cells.length; c++) {
+              const cell = t.rows[r].cells[c];
+              let formula = cell.getAttribute('data-formula');
+              if (!formula) {
+                const childF = cell.querySelector('[data-formula]');
+                if (childF) formula = childF.getAttribute('data-formula');
+              }
+              if (!formula) {
+                const title = cell.getAttribute('title') || '';
+                const idx = title.indexOf('Formula:');
+                if (idx !== -1) formula = title.substring(idx + 8).trim();
+              }
+              if (formula) {
+                const cleanF = cleanFormulaText(formula);
+                if (cleanF.startsWith('=')) {
+                  window._tableFormulaRegistry[tIdx + '_' + r + '_' + c] = cleanF;
+                }
+              }
+            }
+          }
+        });
+      } catch(e) {
+        console.warn('extractAndSeedFormulasFromHtml error:', e);
+      }
+    }
+
     function setEditorData(html) {
+      extractAndSeedFormulasFromHtml(html);
       if (editorInstance) {
         editorInstance.setData(html);
         setTimeout(() => {
@@ -2173,6 +2263,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           evaluateAllTableFormulas(false);
         }, 80);
         setTimeout(() => {
+          scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
         }, 300);
       } else if (isFallback) {
@@ -2351,6 +2442,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         return vals;
       }
 
+      function getRightValues() {
+        const vals = [];
+        if (currentR < grid.length) {
+          for (let c = currentC + 1; c < grid[currentR].length; c++) {
+            const raw = grid[currentR][c];
+            if (raw && /[0-9]/.test(String(raw))) {
+              vals.push(extractNumber(raw));
+            }
+          }
+        }
+        return vals;
+      }
+
+      function getBelowValues() {
+        const vals = [];
+        for (let r = currentR + 1; r < grid.length; r++) {
+          if (currentC < grid[r].length) {
+            const raw = grid[r][currentC];
+            if (raw && /[0-9]/.test(String(raw))) {
+              vals.push(extractNumber(raw));
+            }
+          }
+        }
+        return vals;
+      }
+
       let expr = rawExpr;
 
       // Normalize spaces around parentheses: e.g. SUM ( ABOVE ) -> SUM(ABOVE)
@@ -2389,6 +2506,67 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       expr = expr.replace(/SUM\\(LEFT\\)/gi, () => {
         const vals = getLeftValues();
         return vals.reduce((a, b) => a + b, 0);
+      });
+
+      // 6a. AVG(LEFT), AVERAGE(LEFT)
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(LEFT\\)/gi, () => {
+        const vals = getLeftValues();
+        return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+      });
+
+      // 6b. MIN(LEFT), MAX(LEFT), COUNT(LEFT)
+      expr = expr.replace(/MIN\\(LEFT\\)/gi, () => {
+        const vals = getLeftValues();
+        return vals.length > 0 ? Math.min.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/MAX\\(LEFT\\)/gi, () => {
+        const vals = getLeftValues();
+        return vals.length > 0 ? Math.max.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/COUNT\\(LEFT\\)/gi, () => {
+        return getLeftValues().length;
+      });
+
+      // 6c. Directional RIGHT functions
+      expr = expr.replace(/SUM\\(RIGHT\\)/gi, () => {
+        const vals = getRightValues();
+        return vals.reduce((a, b) => a + b, 0);
+      });
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(RIGHT\\)/gi, () => {
+        const vals = getRightValues();
+        return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+      });
+      expr = expr.replace(/MIN\\(RIGHT\\)/gi, () => {
+        const vals = getRightValues();
+        return vals.length > 0 ? Math.min.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/MAX\\(RIGHT\\)/gi, () => {
+        const vals = getRightValues();
+        return vals.length > 0 ? Math.max.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/COUNT\\(RIGHT\\)/gi, () => {
+        return getRightValues().length;
+      });
+
+      // 6d. Directional BELOW / DOWN functions
+      expr = expr.replace(/SUM\\((?:BELOW|DOWN)\\)/gi, () => {
+        const vals = getBelowValues();
+        return vals.reduce((a, b) => a + b, 0);
+      });
+      expr = expr.replace(/(?:AVG|AVERAGE)\\((?:BELOW|DOWN)\\)/gi, () => {
+        const vals = getBelowValues();
+        return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
+      });
+      expr = expr.replace(/MIN\\((?:BELOW|DOWN)\\)/gi, () => {
+        const vals = getBelowValues();
+        return vals.length > 0 ? Math.min.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/MAX\\((?:BELOW|DOWN)\\)/gi, () => {
+        const vals = getBelowValues();
+        return vals.length > 0 ? Math.max.apply(null, vals) : 0;
+      });
+      expr = expr.replace(/COUNT\\((?:BELOW|DOWN)\\)/gi, () => {
+        return getBelowValues().length;
       });
 
       // 7. SUM(A1:A2) or SUM(A1..A2)
@@ -2569,17 +2747,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             const regKey = tableIdx + '_' + r + '_' + c;
             const rawText = (cell.innerText || cell.textContent || '').trim();
             const cleanTxt = cleanFormulaText(rawText);
+            const isCurrentlyFocused = (cell === document.activeElement || (cell.contains && cell.contains(document.activeElement)));
 
             if (cleanTxt.startsWith('=')) {
               window._tableFormulaRegistry[regKey] = cleanTxt;
               cell.setAttribute('data-formula', cleanTxt);
-              cell.setAttribute('title', 'Formula: ' + cleanTxt);
+              cell.setAttribute('title', 'Formula: ' + cleanTxt + ' (Click fx to edit)');
               cell.classList.add('has-formula');
             } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
               const f = cleanFormulaText(cell.getAttribute('data-formula'));
               if (f.startsWith('=')) {
-                // If user typed a manual number/text without '=' and without 'fx', user intentionally replaced formula
-                if (rawText && !rawText.includes('fx') && !cleanTxt.startsWith('=')) {
+                // Only if user is actively focused inside this exact cell and manually erased or replaced the formula
+                if (isCurrentlyFocused && cleanTxt && !cleanTxt.startsWith('=') && !rawText.includes('fx')) {
                   delete window._tableFormulaRegistry[regKey];
                   cell.removeAttribute('data-formula');
                   cell.removeAttribute('title');
@@ -2588,6 +2767,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                   if (badge) badge.remove();
                 } else {
                   window._tableFormulaRegistry[regKey] = f;
+                  cell.setAttribute('data-formula', f);
+                  cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
                   cell.classList.add('has-formula');
                 }
               }
@@ -2598,9 +2779,33 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 if (f.startsWith('=')) {
                   window._tableFormulaRegistry[regKey] = f;
                   cell.setAttribute('data-formula', f);
-                  cell.setAttribute('title', 'Formula: ' + f);
+                  cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
                   cell.classList.add('has-formula');
                 }
+              } else {
+                const withTitle = cell.querySelector('[title*="Formula:"]');
+                if (withTitle) {
+                  const title = withTitle.getAttribute('title') || '';
+                  const idx = title.indexOf('Formula:');
+                  if (idx !== -1) {
+                    const cand = cleanFormulaText(title.substring(idx + 8));
+                    if (cand.startsWith('=')) {
+                      window._tableFormulaRegistry[regKey] = cand;
+                      cell.setAttribute('data-formula', cand);
+                      cell.setAttribute('title', 'Formula: ' + cand + ' (Click fx to edit)');
+                      cell.classList.add('has-formula');
+                    }
+                  }
+                }
+              }
+            }
+            // Preserve if already in registry
+            if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
+              const f = window._tableFormulaRegistry[regKey];
+              if (f && f.startsWith('=')) {
+                cell.setAttribute('data-formula', f);
+                cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
+                cell.classList.add('has-formula');
               }
             }
           }
@@ -2986,10 +3191,23 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function openTableColorModal() {
-      const cell = getActiveTableCell();
+      let cell = getActiveTableCell();
       if (!cell) {
-        showToastMsg('⚠️ Click inside a table cell first!');
-        return;
+        const anyCell = document.querySelector('.ck-content table td, .ck-content table th, #fallback-content table td, #fallback-content table th, table td, table th');
+        if (anyCell) {
+          lastActiveTableCell = anyCell;
+          cell = anyCell;
+        } else {
+          showToastMsg('⚠️ Please insert or click inside a table first!');
+          return;
+        }
+      }
+      const coordEl = document.getElementById('tbl-color-target-info');
+      if (coordEl && cell) {
+        const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
+        const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+        const colLetter = String.fromCharCode(65 + (c % 26));
+        coordEl.textContent = 'Active: Cell ' + colLetter + (r + 1);
       }
       document.getElementById('table-color-modal').classList.add('show');
     }
@@ -3034,10 +3252,14 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const table = cell.closest('table');
       if (!table) return;
 
-      const colIdx = cell.cellIndex;
+      const liveTables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table'));
+      const tableIdx = Math.max(0, liveTables.indexOf(table));
+      const colIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
       const row = cell.closest('tr');
+      const rowIdx = row ? row.rowIndex : 0;
 
-      const applyToCell = (c) => {
+      // 1. Direct DOM style application for instant visual feedback
+      const applyToDomCell = (c) => {
         if (!c) return;
         if (bgColor !== null && bgColor !== undefined) c.style.backgroundColor = bgColor;
         if (txtColor !== null && txtColor !== undefined) c.style.color = txtColor;
@@ -3049,36 +3271,28 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       };
 
       if (currentTableTarget === 'cell') {
-        applyToCell(cell);
+        applyToDomCell(cell);
       } else if (currentTableTarget === 'col') {
         for (let i = 0; i < table.rows.length; i++) {
           const r = table.rows[i];
-          if (r.cells && r.cells[colIdx]) {
-            applyToCell(r.cells[colIdx]);
-          }
+          if (r.cells && r.cells[colIdx]) applyToDomCell(r.cells[colIdx]);
         }
       } else if (currentTableTarget === 'row') {
         if (row && row.cells) {
-          for (let j = 0; j < row.cells.length; j++) {
-            applyToCell(row.cells[j]);
-          }
+          for (let j = 0; j < row.cells.length; j++) applyToDomCell(row.cells[j]);
         }
       } else if (currentTableTarget === 'table') {
         for (let i = 0; i < table.rows.length; i++) {
           const r = table.rows[i];
-          for (let j = 0; j < r.cells.length; j++) {
-            applyToCell(r.cells[j]);
-          }
+          for (let j = 0; j < r.cells.length; j++) applyToDomCell(r.cells[j]);
         }
       } else if (currentTableTarget === 'header') {
         if (table.rows.length > 0) {
           const r = table.rows[0];
           for (let j = 0; j < r.cells.length; j++) {
             const c = r.cells[j];
-            c.style.backgroundColor = bgColor || '#1e293b';
-            c.style.color = txtColor || '#ffffff';
+            applyToDomCell(c);
             c.style.fontWeight = '700';
-            if (borderColor) c.style.borderColor = borderColor;
           }
         }
       } else if (currentTableTarget === 'zebra') {
@@ -3095,13 +3309,97 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
       }
 
-      // Sync with CKEditor model and Flutter
-      if (editorInstance) {
+      // 2. Persist in CKEditor 5 model
+      if (editorInstance && editorInstance.model) {
         try {
-          const html = editorInstance.getData();
-          postToFlutter({ type: 'ckeditor_change', html: html });
-        } catch(e) {}
+          editorInstance.model.change(writer => {
+            const root = editorInstance.model.document.getRoot();
+            let curT = 0;
+            for (const child of root.getChildren()) {
+              if (child.name === 'table') {
+                if (curT === tableIdx) {
+                  const modelRows = Array.from(child.getChildren()).filter(n => n.name === 'tableRow');
+                  const applyToModelCell = (mCell) => {
+                    if (!mCell) return;
+                    if (bgColor !== null && bgColor !== undefined) {
+                      if (bgColor === '') writer.removeAttribute('backgroundColor', mCell);
+                      else writer.setAttribute('backgroundColor', bgColor, mCell);
+                    }
+                    if (borderColor !== null && borderColor !== undefined) {
+                      if (borderColor === '') {
+                        writer.removeAttribute('borderColor', mCell);
+                        writer.removeAttribute('borderStyle', mCell);
+                        writer.removeAttribute('borderWidth', mCell);
+                      } else {
+                        writer.setAttribute('borderColor', borderColor, mCell);
+                        writer.setAttribute('borderStyle', 'solid', mCell);
+                        writer.setAttribute('borderWidth', '1px', mCell);
+                      }
+                    }
+                    if (txtColor !== null && txtColor !== undefined) {
+                      for (const p of mCell.getChildren()) {
+                        const range = writer.createRangeIn(p);
+                        if (txtColor === '') writer.removeAttribute('fontColor', range);
+                        else writer.setAttribute('fontColor', txtColor, range);
+                      }
+                    }
+                  };
+
+                  if (currentTableTarget === 'cell') {
+                    if (modelRows[rowIdx]) {
+                      const mCells = Array.from(modelRows[rowIdx].getChildren()).filter(n => n.name === 'tableCell');
+                      if (mCells[colIdx]) applyToModelCell(mCells[colIdx]);
+                    }
+                  } else if (currentTableTarget === 'col') {
+                    for (let r = 0; r < modelRows.length; r++) {
+                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
+                      if (mCells[colIdx]) applyToModelCell(mCells[colIdx]);
+                    }
+                  } else if (currentTableTarget === 'row') {
+                    if (modelRows[rowIdx]) {
+                      const mCells = Array.from(modelRows[rowIdx].getChildren()).filter(n => n.name === 'tableCell');
+                      mCells.forEach(applyToModelCell);
+                    }
+                  } else if (currentTableTarget === 'table') {
+                    for (let r = 0; r < modelRows.length; r++) {
+                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
+                      mCells.forEach(applyToModelCell);
+                    }
+                  } else if (currentTableTarget === 'header') {
+                    if (modelRows[0]) {
+                      const mCells = Array.from(modelRows[0].getChildren()).filter(n => n.name === 'tableCell');
+                      mCells.forEach(applyToModelCell);
+                    }
+                  } else if (currentTableTarget === 'zebra') {
+                    const color1 = bgColor || '#f8fafc';
+                    const color2 = '#ffffff';
+                    for (let r = 0; r < modelRows.length; r++) {
+                      const bg = (r % 2 === 0) ? color1 : color2;
+                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
+                      mCells.forEach(mc => {
+                        writer.setAttribute('backgroundColor', bg, mc);
+                        if (borderColor) writer.setAttribute('borderColor', borderColor, mc);
+                        if (txtColor) {
+                          for (const p of mc.getChildren()) {
+                            writer.setAttribute('fontColor', txtColor, writer.createRangeIn(p));
+                          }
+                        }
+                      });
+                    }
+                  }
+                  break;
+                }
+                curT++;
+              }
+            }
+          });
+        } catch(e) {
+          console.warn('Model table formatting error:', e);
+        }
       }
+
+      // 3. Post to Flutter
+      postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       showToastMsg('🎨 Table formatting updated!');
     }
 
