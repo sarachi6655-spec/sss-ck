@@ -1900,17 +1900,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           };
 
           /* Content change listener - always use getEditorData() to preserve table formulas */
-          editor.model.document.on('change:data', () => {
+          editor.model.document.on('change:data', (evt, batch) => {
             const data = getEditorData();
             postToFlutter({ type: 'ckeditor_change', html: data });
             updateParaCount();
             updatePageIndicator();
             if (trackChangesEnabled) recordChange();
             autoSaveRevision();
-            scheduleLiveFormulaRecalc();
+            // Only recalculate formulas if this is a real user edit batch, not an internal non-undoable formula sync
+            if (!window._isUpdatingFormula && (!batch || batch.isUndoable !== false)) {
+              scheduleLiveFormulaRecalc();
+            }
           });
 
-          /* Attach live input/keyup/keydown listeners + MutationObserver on editable DOM */
+          /* Attach live input/keyup/keydown listeners on editable DOM */
           try {
             if (editor.ui && editor.ui.view && editor.ui.view.editable && editor.ui.view.editable.element) {
               const el = editor.ui.view.editable.element;
@@ -1922,13 +1925,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                   scheduleLiveFormulaRecalc();
                 }
               });
-              // MutationObserver: catches CKEditor's model→view DOM writes that events may miss
+              // MutationObserver: attaches media listeners on DOM structure changes without triggering formula loops
               const formulaObserver = new MutationObserver(() => {
-                if (!window._isUpdatingFormula) scheduleLiveFormulaRecalc();
                 attachMediaListeners();
                 attachMediaDragHandles();
               });
-              formulaObserver.observe(el, { childList: true, subtree: true, characterData: true });
+              formulaObserver.observe(el, { childList: true, subtree: true });
 
               /* Universal Paste Sanitizer & Style Normalizer */
               editor.editing.view.document.on('clipboardInput', (evt, data) => {
@@ -2760,7 +2762,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         clean += s[i];
       }
       clean = clean.trim();
-      clean = clean.replace(/\s*fx\$/i, '').trim();
+      clean = clean.replace(/\\s*\\bfx\\b/gi, '').trim();
       const idx = clean.indexOf('=');
       if (idx !== -1) {
         const before = clean.substring(0, idx).trim();
@@ -2775,7 +2777,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (!raw) return 0;
       let s = String(raw).trim();
       if (s.indexOf('fx') !== -1) {
-        s = s.replace(/\s*fx\b/gi, '').trim();
+        s = s.replace(/\\s*\\bfx\\b/gi, '').trim();
       }
       let numStr = '';
       let hasDot = false;
@@ -3009,31 +3011,31 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       });
 
       // 7. SUM(A1:A2) or SUM(A1..A2)
-      expr = expr.replace(/SUM\\(([A-Za-z]+[0-9]+)(?::|\\.\\.)([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/SUM\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.reduce((a, b) => a + b, 0);
       });
 
       // 8. AVG(A1:A2)
-      expr = expr.replace(/(?:AVG|AVERAGE)\\(([A-Za-z]+[0-9]+)(?::|\\.\\.)([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/(?:AVG|AVERAGE)\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? (vals.reduce((a, b) => a + b, 0) / vals.length) : 0;
       });
 
       // 9. MIN(A1:A2)
-      expr = expr.replace(/MIN\\(([A-Za-z]+[0-9]+)(?::|\\.\\.)([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/MIN\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? Math.min.apply(null, vals) : 0;
       });
 
       // 10. MAX(A1:A2)
-      expr = expr.replace(/MAX\\(([A-Za-z]+[0-9]+)(?::|\\.\\.)([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/MAX\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
         const vals = getRangeValues(c1, c2);
         return vals.length > 0 ? Math.max.apply(null, vals) : 0;
       });
 
       // 11. COUNT(A1:A2)
-      expr = expr.replace(/COUNT\\(([A-Za-z]+[0-9]+)(?::|\\.\\.)([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
+      expr = expr.replace(/COUNT\\(([A-Za-z]+[0-9]+)\\s*(?::|\\.\\.)\\s*([A-Za-z]+[0-9]+)\\)/gi, (m, c1, c2) => {
         return getRangeValues(c1, c2).length;
       });
 
@@ -3175,6 +3177,55 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     window._tableFormulaRegistry = window._tableFormulaRegistry || {};
 
+    function _getModelCellText(cell) {
+      let text = '';
+      try {
+        for (const child of cell.getChildren()) {
+          if (child.is && (child.is('\$text') || child.is('text'))) {
+            text += child.data;
+          } else if (child.getChildren) {
+            text += _getModelCellText(child);
+          }
+        }
+      } catch(e) {}
+      return text.trim();
+    }
+
+    function _removeModelFormulaAttribute(editor, tableIdx, r, c) {
+      try {
+        if (!editor || !editor.model) return;
+        const root = editor.model.document.getRoot();
+        let curT = 0;
+        for (const child of root.getChildren()) {
+          if (child.name === 'table') {
+            if (curT === tableIdx) {
+              const rows = Array.from(child.getChildren()).filter(n => n.name === 'tableRow');
+              if (rows[r]) {
+                const cells = Array.from(rows[r].getChildren()).filter(n => n.name === 'tableCell');
+                const targetCell = cells[c];
+                if (targetCell && targetCell.hasAttribute('dataFormula')) {
+                  const removeAttr = (writer) => {
+                    try { writer.removeAttribute('dataFormula', targetCell); } catch(e) {}
+                  };
+                  let batch = null;
+                  if (typeof editor.model.createBatch === 'function') {
+                    try { batch = editor.model.createBatch({ isUndoable: false }); } catch (e) { batch = null; }
+                  }
+                  if (batch && typeof editor.model.enqueueChange === 'function') {
+                    editor.model.enqueueChange(batch, removeAttr);
+                  } else if (typeof editor.model.change === 'function') {
+                    editor.model.change(removeAttr);
+                  }
+                }
+              }
+              break;
+            }
+            curT++;
+          }
+        }
+      } catch(e) {}
+    }
+
     function scanAndRegisterTableFormulas() {
       const liveTables = getEditorLiveTables();
       liveTables.forEach((table, tableIdx) => {
@@ -3189,12 +3240,36 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (n.classList && n.classList.contains('formula-badge')) continue;
               rawText += (n.innerText || n.textContent || '');
             }
-            rawText = rawText.replace(/\bfx\b/gi, '').trim();
+            rawText = rawText.replace(/\\bfx\\b/gi, '').trim();
             const cleanTxt = cleanFormulaText(rawText);
+
+            const hasBadge = !!cell.querySelector('.formula-badge');
+            const hadFormula = !!(window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) ||
+                               (cell.getAttribute && !!cell.getAttribute('data-formula')) ||
+                               cell.classList.contains('has-formula');
 
             let formula = null;
             if (cleanTxt.startsWith('=')) {
+              // User explicitly typed or kept a formula starting with =
               formula = cleanTxt;
+            } else if (hadFormula && !hasBadge && !cleanTxt.startsWith('=')) {
+              // User cleared the formula cell or replaced it with a static number/text!
+              if (window._tableFormulaRegistry) {
+                delete window._tableFormulaRegistry[regKey];
+              }
+              if (cell.removeAttribute) {
+                cell.removeAttribute('data-formula');
+                cell.removeAttribute('title');
+                cell.classList.remove('has-formula');
+              }
+              const b = cell.querySelector('.formula-badge');
+              if (b) b.remove();
+              const s = cell.querySelector('strong');
+              if (s) s.removeAttribute('data-formula');
+              if (editorInstance && editorInstance.model) {
+                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
+              }
+              formula = null;
             } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
               formula = cleanFormulaText(cell.getAttribute('data-formula'));
             } else if (cell.getAttribute && cell.getAttribute('title')) {
@@ -3225,7 +3300,17 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function getCellFormula(cell, tableIdx, r, c) {
-      const regKey = (tableIdx !== undefined && r !== undefined && c !== undefined) ? (tableIdx + '_' + r + '_' + c) : null;
+      if (cell && (tableIdx === undefined || r === undefined || c === undefined)) {
+        const table = cell.closest('table');
+        if (table) {
+          const liveTables = getEditorLiveTables();
+          tableIdx = liveTables.indexOf(table);
+          const row = cell.closest('tr');
+          r = row ? row.rowIndex : 0;
+          c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+        }
+      }
+      const regKey = (tableIdx !== undefined && tableIdx >= 0 && r !== undefined && c !== undefined) ? (tableIdx + '_' + r + '_' + c) : null;
       if (cell) {
         const directText = cleanFormulaText(cell.innerText || cell.textContent || '');
         if (directText.startsWith('=')) {
@@ -3305,18 +3390,36 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 const cells = Array.from(rows[r].getChildren()).filter(n => n.name === 'tableCell');
                 const targetCell = cells[c];
                 if (targetCell) {
-                  editor.model.change(writer => {
+                  const currentText = _getModelCellText(targetCell);
+                  const currentFormula = targetCell.getAttribute('dataFormula');
+                  // Only touch model if text or formula actually changed!
+                  if (currentText === String(resStr).trim() && currentFormula === formula) {
+                    return;
+                  }
+                  
+                  const updateCell = (writer) => {
                     const range = writer.createRangeIn(targetCell);
                     writer.remove(range);
                     const p = writer.createElement('paragraph');
                     writer.insert(p, targetCell, 0);
-                    writer.insertText(resStr, { bold: true }, p, 0);
+                    writer.insertText(String(resStr), { bold: true }, p, 0);
                     if (formula) {
                       try {
                         writer.setAttribute('dataFormula', formula, targetCell);
                       } catch (e) {}
                     }
-                  });
+                  };
+
+                  // CRITICAL: Use non-undoable batch so formula sync NEVER enters undo history!
+                  let batch = null;
+                  if (typeof editor.model.createBatch === 'function') {
+                    try { batch = editor.model.createBatch({ isUndoable: false }); } catch (e) { batch = null; }
+                  }
+                  if (batch && typeof editor.model.enqueueChange === 'function') {
+                    editor.model.enqueueChange(batch, updateCell);
+                  } else if (typeof editor.model.change === 'function') {
+                    editor.model.change(updateCell);
+                  }
                 }
               }
               break;
@@ -3367,62 +3470,73 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             }
           }
 
-          // 3. Recalculate formula cells and update LIVE DOM
-          for (let r = 0; r < liveRows.length; r++) {
-            for (let c = 0; c < liveRows[r].cells.length; c++) {
-              const liveCell = liveRows[r].cells[c];
-              const formula = getCellFormula(liveCell, tableIdx, r, c);
-              if (formula && formula.startsWith('=')) {
-                const res = evaluateFormulaString(formula, grid, r, c);
-                if (res !== null) {
-                  const resStr = String(res);
-                  liveCell.setAttribute('data-formula', formula);
-                  liveCell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
-                  liveCell.classList.add('has-formula');
+          // 3. Recalculate formula cells and update LIVE DOM (up to 2 passes for chained formulas)
+          let pass = 0;
+          while (pass < 2) {
+            let passUpdated = false;
+            for (let r = 0; r < liveRows.length; r++) {
+              for (let c = 0; c < liveRows[r].cells.length; c++) {
+                const liveCell = liveRows[r].cells[c];
+                // CRITICAL: Protect the active cell currently being edited/typed in!
+                if (liveCell.contains(document.activeElement)) {
+                  continue;
+                }
+                const formula = getCellFormula(liveCell, tableIdx, r, c);
+                if (formula && formula.startsWith('=')) {
+                  const res = evaluateFormulaString(formula, grid, r, c);
+                  if (res !== null) {
+                    const resStr = String(res);
+                    liveCell.setAttribute('data-formula', formula);
+                    liveCell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
+                    liveCell.classList.add('has-formula');
 
-                  let p = liveCell.querySelector('p');
-                  if (!p) {
-                    p = document.createElement('p');
-                    liveCell.innerHTML = '';
-                    liveCell.appendChild(p);
-                  }
-                  let strong = p.querySelector('strong');
-                  if (!strong) {
-                    strong = document.createElement('strong');
-                    p.prepend(strong);
-                  }
-                  if (strong.textContent !== resStr) {
-                    strong.textContent = resStr;
-                    anyUpdated = true;
-                  }
-                  strong.setAttribute('data-formula', formula);
+                    let p = liveCell.querySelector('p');
+                    if (!p) {
+                      p = document.createElement('p');
+                      liveCell.innerHTML = '';
+                      liveCell.appendChild(p);
+                    }
+                    let strong = p.querySelector('strong');
+                    if (!strong) {
+                      strong = document.createElement('strong');
+                      p.prepend(strong);
+                    }
+                    if (strong.textContent !== resStr) {
+                      strong.textContent = resStr;
+                      anyUpdated = true;
+                      passUpdated = true;
+                    }
+                    strong.setAttribute('data-formula', formula);
 
-                  // Ensure interactive .formula-badge is present in live editor DOM
-                  let badge = p.querySelector('.formula-badge') || liveCell.querySelector('.formula-badge');
-                  if (!badge) {
-                    badge = document.createElement('span');
-                    badge.className = 'formula-badge';
-                    badge.setAttribute('contenteditable', 'false');
-                    badge.setAttribute('data-formula', formula);
-                    badge.title = 'Formula: ' + formula + ' (Click to edit)';
-                    badge.textContent = 'fx';
-                    p.appendChild(badge);
-                  } else {
-                    badge.setAttribute('data-formula', formula);
-                    badge.title = 'Formula: ' + formula + ' (Click to edit)';
-                    if (badge.parentElement !== p) p.appendChild(badge);
-                  }
+                    // Ensure interactive .formula-badge is present in live editor DOM
+                    let badge = p.querySelector('.formula-badge') || liveCell.querySelector('.formula-badge');
+                    if (!badge) {
+                      badge = document.createElement('span');
+                      badge.className = 'formula-badge';
+                      badge.setAttribute('contenteditable', 'false');
+                      badge.setAttribute('data-formula', formula);
+                      badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                      badge.textContent = 'fx';
+                      p.appendChild(badge);
+                    } else {
+                      badge.setAttribute('data-formula', formula);
+                      badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                      if (badge.parentElement !== p) p.appendChild(badge);
+                    }
 
-                  // Update grid so chained formulas work instantly
-                  grid[r][c] = resStr;
+                    // Update grid so chained formulas work instantly
+                    grid[r][c] = resStr;
 
-                  // Keep CKEditor model in sync
-                  if (editorInstance) {
-                    _syncModelFormulaCell(editorInstance, tableIdx, r, c, resStr, formula);
+                    // Keep CKEditor model in sync (non-undoable batch)
+                    if (editorInstance) {
+                      _syncModelFormulaCell(editorInstance, tableIdx, r, c, resStr, formula);
+                    }
                   }
                 }
               }
             }
+            if (!passUpdated) break;
+            pass++;
           }
         });
 
@@ -3430,7 +3544,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
         }
       } finally {
-        window._isUpdatingFormula = false;
+        setTimeout(() => {
+          window._isUpdatingFormula = false;
+        }, 50);
       }
     }
     window.autoUpdateTableFormulasDOM = autoUpdateTableFormulasDOM;
@@ -3445,13 +3561,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     // Recalculate when cell loses focus
     document.addEventListener('focusout', function(e) {
-      setTimeout(() => {
-        scanAndRegisterTableFormulas();
-        autoUpdateTableFormulasDOM();
-        if (editorInstance && editorInstance.model) {
-          syncAllModelFormulaCells();
-        }
-      }, 40);
+      if (e.target && e.target.closest && e.target.closest('table')) {
+        setTimeout(() => {
+          scanAndRegisterTableFormulas();
+          autoUpdateTableFormulasDOM();
+          if (editorInstance && editorInstance.model) {
+            syncAllModelFormulaCells();
+          }
+        }, 40);
+      }
     }, true);
 
     function syncAllModelFormulaCells() {
@@ -3477,10 +3595,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     // Recalculate on Enter/Tab in table cell
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' || e.key === 'Tab') {
-        setTimeout(() => {
-          scanAndRegisterTableFormulas();
-          autoUpdateTableFormulasDOM();
-        }, 30);
+        const cell = getActiveTableCell();
+        if (cell) {
+          const raw = cleanFormulaText(cell.innerText || cell.textContent || '');
+          if (raw.startsWith('=') && e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          setTimeout(() => {
+            scanAndRegisterTableFormulas();
+            autoUpdateTableFormulasDOM();
+          }, 30);
+        }
       }
     }, true);
 
@@ -3520,10 +3646,17 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }, true);
 
     function showFormulaHelpModal() {
-      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      let cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
       if (!cell || !document.contains(cell)) {
-        showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
-        return;
+        const anyCell = document.querySelector('.ck-content table td, .ck-content table th, #fallback-content table td, #fallback-content table th, table td, table th');
+        if (anyCell) {
+          cell = anyCell;
+          window._targetFormulaCell = anyCell;
+          lastActiveTableCell = anyCell;
+        } else {
+          showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
+          return;
+        }
       }
       openCellFormulaEditor(cell);
     }
@@ -3619,7 +3752,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         if (badge) badge.remove();
         const strong = cell.querySelector('strong');
         if (strong) strong.removeAttribute('data-formula');
-        showToastMsg('🗑 Formula removed');
+
+        if (editorInstance && editorInstance.model) {
+          _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
+        }
+
+        showToastMsg('🗑 Formula removed; cell is now static number');
         postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       }
       closeFormulaHelpModal();
@@ -4463,47 +4601,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
-    /* Key listener for Cmd+/, Ctrl+/, and Enter/Tab in table cells */
+    /* Key listener for Cmd+/, Ctrl+/ (Slash Commands) */
     document.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === '/') {
         e.preventDefault();
         showSlashModal();
         return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        const sel = window.getSelection ? window.getSelection() : null;
-        if (sel && sel.anchorNode) {
-          const el = sel.anchorNode.nodeType === 3 ? sel.anchorNode.parentElement : sel.anchorNode;
-          const td = el ? el.closest('td, th') : null;
-          if (td) {
-            const raw = cleanFormulaText(td.innerText || td.textContent || '');
-            if (raw.startsWith('=')) {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                e.stopPropagation();
-              }
-              setTimeout(() => {
-                scanAndRegisterTableFormulas();
-                evaluateAllTableFormulas(true);
-              }, 40);
-            } else {
-              setTimeout(() => {
-                scanAndRegisterTableFormulas();
-                evaluateAllTableFormulas(false);
-              }, 40);
-            }
-          }
-        }
-      }
-    });
-
-    /* Auto-evaluate when user leaves table cell */
-    document.addEventListener('focusout', (e) => {
-      if (e.target && e.target.closest && e.target.closest('table')) {
-        setTimeout(() => {
-          scanAndRegisterTableFormulas();
-          evaluateAllTableFormulas(false);
-        }, 50);
       }
     });
 
