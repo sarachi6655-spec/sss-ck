@@ -114,10 +114,15 @@ class HtmlDocumentCodec {
         final String formulaAttr = (formula != null && formula.isNotEmpty) ? ' data-formula="$formula"' : '';
         final String titleAttr = (title != null && title.isNotEmpty) ? ' title="$title"' : '';
 
-        final String cellHtml = cell.metadata['html'] as String? ?? '';
+        String cellHtml = cell.metadata['html'] as String? ?? '';
+        if (cellHtml.isNotEmpty) {
+          cellHtml = cellHtml.replaceAll(RegExp(r'<span class="formula-badge"[^>]*>.*?</span>', caseSensitive: false), '');
+          cellHtml = cellHtml.replaceAllMapped(RegExp(r'(\d+)\s*fx\b', caseSensitive: false), (m) => m[1]!);
+        }
+        final String rawText = cell.text.replaceAll(RegExp(r'\s*fx\b', caseSensitive: false), '').trim();
         final String cellContent = cellHtml.isNotEmpty
             ? cellHtml
-            : (cell.text.isNotEmpty ? _escapeHtml(cell.text) : '&nbsp;');
+            : (rawText.isNotEmpty ? _escapeHtml(rawText) : '&nbsp;');
 
         buffer.write('        <$tag$colspanAttr$rowspanAttr$formulaAttr$titleAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
       }
@@ -387,8 +392,10 @@ class HtmlDocumentCodec {
       for (int c = 0; c < cells.length; c++) {
         final dom.Element cell = cells[c];
         final bool isHeader = cell.localName == 'th';
-        final String innerHtml = cell.innerHtml.trim();
-        final String cellText = cell.text.trim();
+        String innerHtml = cell.innerHtml.trim();
+        innerHtml = innerHtml.replaceAll(RegExp(r'<span class="formula-badge"[^>]*>.*?</span>', caseSensitive: false), '').trim();
+        innerHtml = innerHtml.replaceAllMapped(RegExp(r'(\d+)\s*fx\b', caseSensitive: false), (m) => m[1]!);
+        String cellText = cell.text.replaceAll(RegExp(r'\s*fx\b', caseSensitive: false), '').trim();
         final String? colspan = cell.attributes['colspan'];
         final String? rowspan = cell.attributes['rowspan'];
         final String? cellStyle = cell.attributes['style'];

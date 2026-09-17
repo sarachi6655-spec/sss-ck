@@ -269,28 +269,30 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content table td, .ck-content table th { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; vertical-align: top; min-width: 48px; box-sizing: border-box; }
     .ck-content table th { background: #f1f5f9; font-weight: 600; color: #0f172a; }
     .ck-content table tr:nth-child(even) td { background: #f8fafc; }
-    .ck-content table td.has-formula, .ck-content table th.has-formula { background: #f8faff !important; position: relative; }
-    .formula-badge {
-      display: inline-flex;
-      align-items: center;
-      font-size: 10.5px;
-      padding: 1px 6px;
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
-      border-radius: 4px;
-      font-weight: 600;
-      cursor: pointer;
-      margin-left: 5px;
-      user-select: none;
-      vertical-align: middle;
-      transition: all 0.15s ease;
+    .ck-content table td.has-formula, .ck-content table th.has-formula,
+    .ck-content table td[data-formula], .ck-content table th[data-formula] {
+      position: relative !important;
     }
-    .formula-badge:hover {
-      background: #dbeafe;
-      border-color: #93c5fd;
-      transform: scale(1.05);
+    .ck-content table td.has-formula::after,
+    .ck-content table th.has-formula::after,
+    .ck-content table td[data-formula]::after,
+    .ck-content table th[data-formula]::after {
+      content: "fx" !important;
+      display: inline-block !important;
+      font-size: 10px !important;
+      padding: 1px 5px !important;
+      background: #eff6ff !important;
+      color: #1d4ed8 !important;
+      border: 1px solid #bfdbfe !important;
+      border-radius: 4px !important;
+      font-weight: 700 !important;
+      margin-left: 6px !important;
+      user-select: none !important;
+      vertical-align: middle !important;
+      line-height: 1.2 !important;
+      cursor: pointer !important;
     }
+    .formula-badge { display: none !important; }
     /* Highlight */
     .ck-content mark, .ck-content .marker-yellow { background: #fef08a; }
     .ck-content .marker-green { background: #bbf7d0; }
@@ -518,13 +520,17 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .modal-overlay {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       background: rgba(0,0,0,0.5); display: none; align-items: center;
-      justify-content: center; z-index: 9999;
+      justify-content: center; z-index: 99999;
+      padding: 16px;
+      box-sizing: border-box;
     }
     .modal-overlay.show { display: flex; }
     .modal-box {
-      background: white; border-radius: 12px; padding: 24px; width: 90%;
-      max-width: 600px; max-height: 80vh; overflow-y: auto;
+      background: white; border-radius: 12px; padding: 20px 24px; width: 92%;
+      max-width: 620px; max-height: calc(100vh - 48px); overflow-y: auto;
       box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+      box-sizing: border-box;
+      scrollbar-width: thin;
     }
     .modal-box h2 { margin-bottom: 16px; color: #0f172a; }
     .modal-box .close-modal { float: right; background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; }
@@ -752,13 +758,159 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       overflow: visible !important;
     }
 
-    /* Balloon Panels (Table Toolbar, Link Balloon, etc.) */
+    /* Balloon Panels (Table Toolbar, Table Properties, Cell Properties, Link Balloon, etc.) */
     .ck.ck-balloon-panel,
     .ck-balloon-panel {
-      max-width: min(520px, 95vw) !important;
-      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18) !important;
-      border-radius: 8px !important;
-      z-index: 1000 !important;
+      max-width: min(520px, calc(100vw - 16px)) !important;
+      max-height: calc(100vh - 48px) !important;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.12) !important;
+      border-radius: 10px !important;
+      border: 1px solid #cbd5e1 !important;
+      z-index: 10000 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+      background: #ffffff !important;
+    }
+
+    .ck.ck-balloon-panel .ck-balloon-panel__content,
+    .ck-balloon-panel .ck-balloon-panel__content {
+      max-height: calc(100vh - 60px) !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      -webkit-overflow-scrolling: touch !important;
+      box-sizing: border-box !important;
+      scrollbar-width: thin !important;
+      scrollbar-color: #cbd5e1 transparent !important;
+      padding: 0 !important;
+    }
+
+    .ck.ck-balloon-panel .ck-balloon-panel__content::-webkit-scrollbar {
+      width: 5px;
+    }
+    .ck.ck-balloon-panel .ck-balloon-panel__content::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+
+    /* Table Properties & Cell Properties Form Polish */
+    .ck.ck-table-properties-form,
+    .ck.ck-table-cell-properties-form,
+    .ck.ck-form {
+      padding: 12px 14px !important;
+      box-sizing: border-box !important;
+    }
+
+    .ck.ck-form__header {
+      padding: 0 0 8px 0 !important;
+      margin-bottom: 8px !important;
+      border-bottom: 1px solid #e2e8f0 !important;
+    }
+
+    .ck.ck-form__header .ck-form__header__title {
+      font-size: 14px !important;
+      font-weight: 700 !important;
+      color: #0f172a !important;
+      letter-spacing: -0.2px;
+    }
+
+    .ck.ck-form__row {
+      margin-bottom: 8px !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      flex-wrap: wrap !important;
+    }
+
+    .ck.ck-labeled-field-view {
+      margin-bottom: 6px !important;
+    }
+
+    .ck.ck-labeled-field-view .ck-labeled-field-view__input-wrapper {
+      margin-top: 2px !important;
+    }
+
+    .ck.ck-table-properties-form .ck-input,
+    .ck.ck-table-cell-properties-form .ck-input {
+      min-height: 28px !important;
+      padding: 4px 8px !important;
+      font-size: 12.5px !important;
+      border-radius: 6px !important;
+      border: 1px solid #cbd5e1 !important;
+      background: #f8fafc !important;
+      transition: all 0.15s ease !important;
+    }
+
+    .ck.ck-table-properties-form .ck-input:focus,
+    .ck.ck-table-cell-properties-form .ck-input:focus {
+      border-color: #3b82f6 !important;
+      background: #ffffff !important;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15) !important;
+    }
+
+    /* Buttons inside balloon forms (Save, Cancel) */
+    .ck.ck-form__actions {
+      display: flex !important;
+      gap: 8px !important;
+      justify-content: flex-end !important;
+      margin-top: 10px !important;
+      padding-top: 8px !important;
+      border-top: 1px solid #f1f5f9 !important;
+    }
+
+    .ck.ck-button-save {
+      background: #2563eb !important;
+      color: #ffffff !important;
+      border-radius: 6px !important;
+      padding: 5px 14px !important;
+      font-weight: 600 !important;
+      font-size: 12.5px !important;
+      min-height: 30px !important;
+      transition: all 0.15s ease !important;
+    }
+    .ck.ck-button-save:hover {
+      background: #1d4ed8 !important;
+    }
+    .ck.ck-button-save .ck-icon {
+      color: #ffffff !important;
+    }
+
+    .ck.ck-button-cancel {
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 6px !important;
+      padding: 5px 14px !important;
+      font-size: 12.5px !important;
+      min-height: 30px !important;
+      color: #475569 !important;
+      transition: all 0.15s ease !important;
+    }
+    .ck.ck-button-cancel:hover {
+      background: #f1f5f9 !important;
+      border-color: #94a3b8 !important;
+    }
+
+    /* Dark mode for balloon forms */
+    body.dark .ck.ck-balloon-panel,
+    body.dark .ck-balloon-panel {
+      background: #1e1e2e !important;
+      border-color: #45475a !important;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4) !important;
+    }
+    body.dark .ck.ck-form__header {
+      border-color: #313244 !important;
+    }
+    body.dark .ck.ck-form__header .ck-form__header__title {
+      color: #cdd6f4 !important;
+    }
+    body.dark .ck.ck-table-properties-form .ck-input,
+    body.dark .ck.ck-table-cell-properties-form .ck-input {
+      background: #313244 !important;
+      border-color: #45475a !important;
+      color: #cdd6f4 !important;
+    }
+    body.dark .ck.ck-button-cancel {
+      border-color: #45475a !important;
+      color: #a6adc8 !important;
     }
 
     /* Comfortable touch tap targets */
@@ -1613,8 +1765,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           }
 
           if (initialContent) {
-            extractAndSeedFormulasFromHtml(initialContent);
-            editor.setData(initialContent);
+            const cleanInitial = sanitizeTableHtml(initialContent);
+            extractAndSeedFormulasFromHtml(cleanInitial);
+            editor.setData(cleanInitial);
             setTimeout(() => {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
@@ -1623,6 +1776,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
             }, 350);
+            setTimeout(() => {
+              scanAndRegisterTableFormulas();
+              evaluateAllTableFormulas(false);
+            }, 700);
           }
 
           /* Set up Base64 image upload adapter */
@@ -1734,9 +1891,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const container = document.getElementById('fallback-container');
       container.style.display = 'flex';
       const content = document.getElementById('fallback-content');
-      if (initialContent) content.innerHTML = initialContent;
+      if (initialContent) content.innerHTML = sanitizeTableHtml(initialContent);
       content.addEventListener('input', () => {
-        postToFlutter({ type: 'ckeditor_change', html: content.innerHTML });
+        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       });
       postToFlutter({ type: 'ckeditor_ready' });
     }
@@ -2229,13 +2386,80 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       return tables.filter(t => !t.closest('.modal-overlay') && !t.closest('.modal-box') && !t.closest('.ck-dropdown'));
     }
 
-    function injectFormulasIntoHtml(html) {
+    function extractFormulaFromTitle(title) {
+      if (!title || typeof title !== 'string') return null;
+      const idx = title.indexOf('Formula:');
+      if (idx === -1) return null;
+      let cand = title.substring(idx + 8).trim();
+      cand = cand.replace(/\s*\([Cc]lick[^\)]*\)/g, '').trim();
+      cand = cleanFormulaText(cand);
+      return cand.startsWith('=') ? cand : null;
+    }
+
+    function sanitizeTableHtml(html) {
       if (!html || typeof html !== 'string' || html.indexOf('<table') === -1) return html;
       try {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         const tables = doc.querySelectorAll('table');
         if (tables.length === 0) return html;
+
+        // Remove all legacy .formula-badge elements
+        doc.querySelectorAll('.formula-badge').forEach(b => b.remove());
+
+        tables.forEach(table => {
+          for (let r = 0; r < table.rows.length; r++) {
+            for (let c = 0; c < table.rows[r].cells.length; c++) {
+              const cell = table.rows[r].cells[c];
+
+              let formula = cell.getAttribute('data-formula') || extractFormulaFromTitle(cell.getAttribute('title'));
+              if (!formula) {
+                const childF = cell.querySelector('[data-formula]');
+                if (childF) formula = childF.getAttribute('data-formula');
+              }
+              if (!formula) {
+                const childT = cell.querySelector('[title*="Formula:"]');
+                if (childT) formula = extractFormulaFromTitle(childT.getAttribute('title'));
+              }
+
+              // Strip accidental 'fx' suffix from cell text (e.g. 12fx -> 12, 206fx -> 206)
+              const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
+              let node;
+              while (node = walker.nextNode()) {
+                if (/\b\d+\s*fx\b/i.test(node.nodeValue)) {
+                  node.nodeValue = node.nodeValue.replace(/(\d+)\s*fx\b/gi, '\$1');
+                } else if (node.nodeValue.trim() === 'fx') {
+                  node.nodeValue = '';
+                }
+              }
+
+              if (formula) formula = cleanFormulaText(formula);
+              if (formula && formula.startsWith('=')) {
+                cell.setAttribute('data-formula', formula);
+                cell.setAttribute('title', 'Formula: ' + formula);
+                cell.classList.add('has-formula');
+              }
+            }
+          }
+        });
+
+        return doc.body.innerHTML;
+      } catch (e) {
+        console.warn('sanitizeTableHtml error:', e);
+        return html;
+      }
+    }
+
+    function cleanAndExportFormulasInHtml(html) {
+      if (!html || typeof html !== 'string' || html.indexOf('<table') === -1) return html;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const tables = doc.querySelectorAll('table');
+        if (tables.length === 0) return html;
+
+        // Remove all legacy .formula-badge spans
+        doc.querySelectorAll('.formula-badge').forEach(b => b.remove());
 
         const liveTables = getEditorLiveTables();
 
@@ -2252,19 +2476,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 formula = window._tableFormulaRegistry[regKey];
               } else if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
                 const liveC = liveT.rows[r].cells[c];
-                formula = liveC.getAttribute('data-formula') || (liveC.querySelector('[data-formula]') ? liveC.querySelector('[data-formula]').getAttribute('data-formula') : null);
-                if (!formula && liveC.getAttribute('title')) {
-                  const title = liveC.getAttribute('title') || '';
-                  const idx = title.indexOf('Formula:');
-                  if (idx !== -1) formula = title.substring(idx + 8).trim();
+                formula = liveC.getAttribute('data-formula') || extractFormulaFromTitle(liveC.getAttribute('title'));
+                if (!formula) {
+                  const childF = liveC.querySelector('[data-formula]');
+                  if (childF) formula = childF.getAttribute('data-formula');
+                }
+                if (!formula) {
+                  const childT = liveC.querySelector('[title*="Formula:"]');
+                  if (childT) formula = extractFormulaFromTitle(childT.getAttribute('title'));
                 }
               } else if (cell.getAttribute('data-formula')) {
                 formula = cell.getAttribute('data-formula');
               } else if (cell.getAttribute('title')) {
-                const title = cell.getAttribute('title') || '';
-                const idx = title.indexOf('Formula:');
-                if (idx !== -1) formula = title.substring(idx + 8).trim();
+                formula = extractFormulaFromTitle(cell.getAttribute('title'));
               }
+
+              // Strip accidental 'fx' suffix from cell text
+              const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
+              let node;
+              while (node = walker.nextNode()) {
+                if (/\b\d+\s*fx\b/i.test(node.nodeValue)) {
+                  node.nodeValue = node.nodeValue.replace(/(\d+)\s*fx\b/gi, '\$1');
+                } else if (node.nodeValue.trim() === 'fx') {
+                  node.nodeValue = '';
+                }
+              }
+
               if (formula) formula = cleanFormulaText(formula);
               if (formula && formula.startsWith('=')) {
                 window._tableFormulaRegistry = window._tableFormulaRegistry || {};
@@ -2272,28 +2509,21 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 cell.setAttribute('data-formula', formula);
                 cell.setAttribute('title', 'Formula: ' + formula);
                 cell.classList.add('has-formula');
-                let badge = cell.querySelector('.formula-badge');
-                if (!badge) {
-                  const p = cell.querySelector('p') || cell;
-                  const span = doc.createElement('span');
-                  span.className = 'formula-badge';
-                  span.setAttribute('data-formula', formula);
-                  span.setAttribute('title', 'Formula: ' + formula);
-                  span.textContent = 'fx';
-                  p.appendChild(span);
-                } else {
-                  badge.setAttribute('data-formula', formula);
-                  badge.setAttribute('title', 'Formula: ' + formula);
-                }
               }
+              // Clean out any span that might be inside cell
+              cell.querySelectorAll('.formula-badge').forEach(b => b.remove());
             }
           }
         });
         return doc.body.innerHTML;
       } catch (e) {
-        console.warn('injectFormulasIntoHtml error:', e);
+        console.warn('cleanAndExportFormulasInHtml error:', e);
         return html;
       }
+    }
+
+    function injectFormulasIntoHtml(html) {
+      return cleanAndExportFormulasInHtml(html);
     }
 
     function getEditorData() {
@@ -2303,7 +2533,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       } else if (isFallback) {
         data = document.getElementById('fallback-content').innerHTML;
       }
-      return injectFormulasIntoHtml(data);
+      return cleanAndExportFormulasInHtml(data);
     }
 
     function extractAndSeedFormulasFromHtml(html) {
@@ -2317,23 +2547,14 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           for (let r = 0; r < t.rows.length; r++) {
             for (let c = 0; c < t.rows[r].cells.length; c++) {
               const cell = t.rows[r].cells[c];
-              let formula = cell.getAttribute('data-formula');
+              let formula = cell.getAttribute('data-formula') || extractFormulaFromTitle(cell.getAttribute('title'));
               if (!formula) {
                 const childF = cell.querySelector('[data-formula]');
                 if (childF) formula = childF.getAttribute('data-formula');
               }
               if (!formula) {
-                const title = cell.getAttribute('title') || '';
-                const idx = title.indexOf('Formula:');
-                if (idx !== -1) formula = title.substring(idx + 8).trim();
-              }
-              if (!formula) {
                 const childT = cell.querySelector('[title*="Formula:"]');
-                if (childT) {
-                  const title = childT.getAttribute('title') || '';
-                  const idx = title.indexOf('Formula:');
-                  if (idx !== -1) formula = title.substring(idx + 8).trim();
-                }
+                if (childT) formula = extractFormulaFromTitle(childT.getAttribute('title'));
               }
               if (!formula) {
                 const rawTxt = (cell.innerText || cell.textContent || '').trim();
@@ -2355,9 +2576,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function setEditorData(html) {
-      extractAndSeedFormulasFromHtml(html);
+      const cleanHtml = sanitizeTableHtml(html);
+      extractAndSeedFormulasFromHtml(cleanHtml);
       if (editorInstance) {
-        editorInstance.setData(html);
+        editorInstance.setData(cleanHtml);
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
@@ -2371,7 +2593,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           evaluateAllTableFormulas(false);
         }, 600);
       } else if (isFallback) {
-        document.getElementById('fallback-content').innerHTML = html;
+        document.getElementById('fallback-content').innerHTML = cleanHtml;
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
@@ -2426,6 +2648,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         clean += s[i];
       }
       clean = clean.trim();
+      clean = clean.replace(/\s*fx\$/i, '').trim();
       const idx = clean.indexOf('=');
       if (idx !== -1) {
         const before = clean.substring(0, idx).trim();
@@ -2440,7 +2663,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (!raw) return 0;
       let s = String(raw).trim();
       if (s.indexOf('fx') !== -1) {
-        s = s.split('fx').join('').trim();
+        s = s.replace(/\s*fx\b/gi, '').trim();
       }
       let numStr = '';
       let hasDot = false;
@@ -2851,69 +3074,37 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             const regKey = tableIdx + '_' + r + '_' + c;
             const rawText = (cell.innerText || cell.textContent || '').trim();
             const cleanTxt = cleanFormulaText(rawText);
-            const isCurrentlyFocused = (cell === document.activeElement || (cell.contains && cell.contains(document.activeElement)));
 
+            // Remove legacy .formula-badge if present
+            const legacyBadge = cell.querySelector('.formula-badge');
+            if (legacyBadge) legacyBadge.remove();
+
+            let formula = null;
             if (cleanTxt.startsWith('=')) {
-              window._tableFormulaRegistry[regKey] = cleanTxt;
-              cell.setAttribute('data-formula', cleanTxt);
-              cell.setAttribute('title', 'Formula: ' + cleanTxt + ' (Click fx to edit)');
-              cell.classList.add('has-formula');
+              formula = cleanTxt;
             } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
-              const f = cleanFormulaText(cell.getAttribute('data-formula'));
-              if (f.startsWith('=')) {
-                window._tableFormulaRegistry[regKey] = f;
-                cell.setAttribute('data-formula', f);
-                cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
-                cell.classList.add('has-formula');
-              }
+              formula = cleanFormulaText(cell.getAttribute('data-formula'));
+            } else if (cell.getAttribute && cell.getAttribute('title')) {
+              formula = extractFormulaFromTitle(cell.getAttribute('title'));
             } else if (cell.querySelector) {
               const elF = cell.querySelector('[data-formula]');
               if (elF) {
-                const f = cleanFormulaText(elF.getAttribute('data-formula'));
-                if (f.startsWith('=')) {
-                  window._tableFormulaRegistry[regKey] = f;
-                  cell.setAttribute('data-formula', f);
-                  cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
-                  cell.classList.add('has-formula');
-                }
+                formula = cleanFormulaText(elF.getAttribute('data-formula'));
               } else {
                 const withTitle = cell.querySelector('[title*="Formula:"]');
-                if (withTitle) {
-                  const title = withTitle.getAttribute('title') || '';
-                  const idx = title.indexOf('Formula:');
-                  if (idx !== -1) {
-                    const cand = cleanFormulaText(title.substring(idx + 8));
-                    if (cand.startsWith('=')) {
-                      window._tableFormulaRegistry[regKey] = cand;
-                      cell.setAttribute('data-formula', cand);
-                      cell.setAttribute('title', 'Formula: ' + cand + ' (Click fx to edit)');
-                      cell.classList.add('has-formula');
-                    }
-                  }
-                }
+                if (withTitle) formula = extractFormulaFromTitle(withTitle.getAttribute('title'));
               }
             }
-            // Preserve if already in registry and ensure badge exists
-            if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-              const f = window._tableFormulaRegistry[regKey];
-              if (f && f.startsWith('=')) {
-                cell.setAttribute('data-formula', f);
-                cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
-                cell.classList.add('has-formula');
-                let badge = cell.querySelector('.formula-badge');
-                if (!badge) {
-                  const p = cell.querySelector('p') || cell;
-                  const span = document.createElement('span');
-                  span.className = 'formula-badge';
-                  span.setAttribute('data-formula', f);
-                  span.setAttribute('title', 'Formula: ' + f + ' (Click to edit)');
-                  span.textContent = 'fx';
-                  p.appendChild(span);
-                } else {
-                  badge.setAttribute('data-formula', f);
-                  badge.setAttribute('title', 'Formula: ' + f + ' (Click to edit)');
-                }
-              }
+
+            if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
+              formula = window._tableFormulaRegistry[regKey];
+            }
+
+            if (formula && formula.startsWith('=')) {
+              window._tableFormulaRegistry[regKey] = formula;
+              cell.setAttribute('data-formula', formula);
+              cell.setAttribute('title', 'Formula: ' + formula);
+              cell.classList.add('has-formula');
             }
           }
         }
@@ -2935,6 +3126,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             return f;
           }
         }
+        if (cell.getAttribute && cell.getAttribute('title')) {
+          const f = extractFormulaFromTitle(cell.getAttribute('title'));
+          if (f && f.startsWith('=')) {
+            if (regKey) window._tableFormulaRegistry[regKey] = f;
+            return f;
+          }
+        }
         if (cell.querySelector) {
           const withFormula = cell.querySelectorAll('[data-formula]');
           for (let i = 0; i < withFormula.length; i++) {
@@ -2946,19 +3144,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           }
           const withTitle = cell.querySelectorAll('[title*="Formula:"]');
           for (let i = 0; i < withTitle.length; i++) {
-            const title = withTitle[i].getAttribute('title') || '';
-            const idx = title.indexOf('Formula:');
-            if (idx !== -1) {
-              const cand = cleanFormulaText(title.substring(idx + 8));
-              if (cand.startsWith('=')) {
-                if (regKey) window._tableFormulaRegistry[regKey] = cand;
-                return cand;
-              }
+            const f = extractFormulaFromTitle(withTitle[i].getAttribute('title'));
+            if (f && f.startsWith('=')) {
+              if (regKey) window._tableFormulaRegistry[regKey] = f;
+              return f;
             }
           }
         }
       }
-      if (regKey && window._tableFormulaRegistry[regKey]) {
+      if (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
         return window._tableFormulaRegistry[regKey];
       }
       return null;
@@ -3023,84 +3217,94 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function autoUpdateTableFormulasDOM() {
+      if (window._isUpdatingFormula) return;
       const liveTables = getEditorLiveTables();
       if (liveTables.length === 0) return;
 
-      scanAndRegisterTableFormulas();
+      window._isUpdatingFormula = true;
+      try {
+        scanAndRegisterTableFormulas();
 
-      let anyUpdated = false;
+        let anyUpdated = false;
 
-      liveTables.forEach((liveTable, tableIdx) => {
-        const liveRows = liveTable.rows;
-        if (!liveRows || liveRows.length === 0) return;
+        liveTables.forEach((liveTable, tableIdx) => {
+          const liveRows = liveTable.rows;
+          if (!liveRows || liveRows.length === 0) return;
 
-        // 1. Check if table has any formula
-        let hasFormula = false;
-        for (let r = 0; r < liveRows.length; r++) {
-          for (let c = 0; c < liveRows[r].cells.length; c++) {
-            if (getCellFormula(liveRows[r].cells[c], tableIdx, r, c)) {
-              hasFormula = true;
-              break;
+          // 1. Check if table has any formula
+          let hasFormula = false;
+          for (let r = 0; r < liveRows.length; r++) {
+            for (let c = 0; c < liveRows[r].cells.length; c++) {
+              if (getCellFormula(liveRows[r].cells[c], tableIdx, r, c)) {
+                hasFormula = true;
+                break;
+              }
+            }
+            if (hasFormula) break;
+          }
+          if (!hasFormula) return;
+
+          // 2. Build live grid from live DOM values
+          const grid = [];
+          for (let r = 0; r < liveRows.length; r++) {
+            grid[r] = [];
+            for (let c = 0; c < liveRows[r].cells.length; c++) {
+              const liveCell = liveRows[r].cells[c];
+              grid[r][c] = cleanFormulaText(liveCell.innerText || liveCell.textContent || '');
             }
           }
-          if (hasFormula) break;
-        }
-        if (!hasFormula) return;
 
-        // 2. Build live grid from live DOM values
-        const grid = [];
-        for (let r = 0; r < liveRows.length; r++) {
-          grid[r] = [];
-          for (let c = 0; c < liveRows[r].cells.length; c++) {
-            const liveCell = liveRows[r].cells[c];
-            grid[r][c] = cleanFormulaText(liveCell.innerText || liveCell.textContent || '');
-          }
-        }
+          // 3. Recalculate formula cells and update LIVE DOM
+          for (let r = 0; r < liveRows.length; r++) {
+            for (let c = 0; c < liveRows[r].cells.length; c++) {
+              const liveCell = liveRows[r].cells[c];
+              const formula = getCellFormula(liveCell, tableIdx, r, c);
+              if (formula && formula.startsWith('=')) {
+                const res = evaluateFormulaString(formula, grid, r, c);
+                if (res !== null) {
+                  const resStr = String(res);
+                  liveCell.setAttribute('data-formula', formula);
+                  liveCell.setAttribute('title', 'Formula: ' + formula);
+                  liveCell.classList.add('has-formula');
 
-        // 3. Recalculate formula cells and update LIVE DOM
-        for (let r = 0; r < liveRows.length; r++) {
-          for (let c = 0; c < liveRows[r].cells.length; c++) {
-            const liveCell = liveRows[r].cells[c];
-            const formula = getCellFormula(liveCell, tableIdx, r, c);
-            if (formula && formula.startsWith('=')) {
-              const res = evaluateFormulaString(formula, grid, r, c);
-              if (res !== null) {
-                const resStr = String(res);
-                liveCell.setAttribute('data-formula', formula);
-                liveCell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
-                liveCell.classList.add('has-formula');
+                  // Remove any legacy .formula-badge spans
+                  liveCell.querySelectorAll('.formula-badge').forEach(b => b.remove());
 
-                const strong = liveCell.querySelector('strong');
-                if (strong) {
-                  if (strong.textContent !== resStr) {
-                    strong.textContent = resStr;
-                    strong.setAttribute('data-formula', formula);
+                  const strong = liveCell.querySelector('strong');
+                  if (strong) {
+                    if (strong.textContent !== resStr) {
+                      strong.textContent = resStr;
+                      strong.setAttribute('data-formula', formula);
+                      anyUpdated = true;
+                    }
+                  } else {
+                    const p = liveCell.querySelector('p');
+                    if (p) {
+                      p.innerHTML = '<strong data-formula="' + formula + '">' + resStr + '</strong>';
+                    } else {
+                      liveCell.innerHTML = '<p><strong data-formula="' + formula + '">' + resStr + '</strong></p>';
+                    }
                     anyUpdated = true;
                   }
-                } else {
-                  liveCell.innerHTML = '<p><strong data-formula="' + formula + '">' + resStr + '</strong> <span class="formula-badge" data-formula="' + formula + '" title="Formula: ' + formula + ' (Click to edit)">fx</span></p>';
-                  anyUpdated = true;
-                }
 
-                let badge = liveCell.querySelector('.formula-badge');
-                if (!badge) {
-                  const p = liveCell.querySelector('p') || liveCell;
-                  p.insertAdjacentHTML('beforeend', ' <span class="formula-badge" data-formula="' + formula + '" title="Formula: ' + formula + ' (Click to edit)">fx</span>');
-                } else {
-                  badge.setAttribute('data-formula', formula);
-                  badge.setAttribute('title', 'Formula: ' + formula + ' (Click to edit)');
-                }
+                  // Update grid so chained formulas work instantly
+                  grid[r][c] = resStr;
 
-                // Update grid so chained formulas work instantly
-                grid[r][c] = resStr;
+                  // Keep CKEditor model in sync
+                  if (editorInstance) {
+                    _syncModelFormulaCell(editorInstance, tableIdx, r, c, resStr, formula);
+                  }
+                }
               }
             }
           }
-        }
-      });
+        });
 
-      if (anyUpdated) {
-        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        if (anyUpdated) {
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        }
+      } finally {
+        window._isUpdatingFormula = false;
       }
     }
     window.autoUpdateTableFormulasDOM = autoUpdateTableFormulasDOM;
@@ -3154,22 +3358,41 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
-    // Click on fx badge to open formula editor modal
+    // Click on fx badge or formula cell to open formula editor modal
     document.addEventListener('click', function(e) {
+      const cell = e.target.closest('td, th');
+      if (cell) {
+        lastActiveTableCell = cell;
+        const isFormula = cell.classList.contains('has-formula') || cell.hasAttribute('data-formula') || (cell.getAttribute('title') || '').indexOf('Formula:') !== -1;
+        if (isFormula) {
+          const rect = cell.getBoundingClientRect();
+          // If clicked within 35px of the right edge where fx pseudo badge is rendered
+          if (e.clientX >= rect.right - 35 && e.clientX <= rect.right) {
+            e.preventDefault();
+            e.stopPropagation();
+            openCellFormulaEditor(cell);
+            return;
+          }
+        }
+      }
       const badge = e.target.closest('.formula-badge');
       if (badge) {
         e.preventDefault();
         e.stopPropagation();
-        const cell = badge.closest('td, th');
-        if (cell) {
-          lastActiveTableCell = cell;
-          openCellFormulaEditor(cell);
+        const c = badge.closest('td, th');
+        if (c) {
+          lastActiveTableCell = c;
+          openCellFormulaEditor(c);
         }
       }
     }, true);
 
     function showFormulaHelpModal() {
       const cell = getActiveTableCell();
+      if (!cell) {
+        showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
+        return;
+      }
       openCellFormulaEditor(cell);
     }
 
@@ -3213,7 +3436,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const formula = (input ? input.value : '').trim();
       const cell = getActiveTableCell();
       if (!cell) {
-        showToastMsg('⚠️ Click inside a table cell first');
+        showToastMsg('⚠️ Click inside a table cell first to apply a formula');
         closeFormulaHelpModal();
         return;
       }
@@ -3275,7 +3498,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }, true);
 
     document.addEventListener('selectionchange', function() {
-      const sel = window.getSelection();
+      const sel = window.getSelection ? window.getSelection() : null;
       if (sel && sel.anchorNode) {
         const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
         const cell = node ? node.closest('td, th') : null;
@@ -3284,20 +3507,24 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     });
 
     function getActiveTableCell() {
-      if (lastActiveTableCell && document.contains(lastActiveTableCell)) return lastActiveTableCell;
-      const sel = window.getSelection();
+      const sel = window.getSelection ? window.getSelection() : null;
       if (sel && sel.anchorNode) {
         const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
         const cell = node ? node.closest('td, th') : null;
-        if (cell) {
+        if (cell && document.contains(cell)) {
           lastActiveTableCell = cell;
           return cell;
         }
       }
-      const anyCell = document.querySelector('.ck-content table td, .ck-content table th, #fallback-content table td, #fallback-content table th');
-      if (anyCell) {
-        lastActiveTableCell = anyCell;
-        return anyCell;
+      if (document.activeElement) {
+        const cell = document.activeElement.closest('td, th');
+        if (cell && document.contains(cell)) {
+          lastActiveTableCell = cell;
+          return cell;
+        }
+      }
+      if (lastActiveTableCell && document.contains(lastActiveTableCell)) {
+        return lastActiveTableCell;
       }
       return null;
     }
@@ -4061,6 +4288,68 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }, 50);
       }
     });
+
+    /* ====== SMART VIEWPORT CLAMPING FOR POPUPS & BALLOONS ====== */
+    let _isClamping = false;
+    function clampAllBalloons() {
+      if (_isClamping) return;
+      _isClamping = true;
+      try {
+        const balloons = document.querySelectorAll('.ck.ck-balloon-panel, .ck-balloon-panel');
+        const statusBar = document.getElementById('status-bar');
+        const statusBarHeight = (statusBar && statusBar.offsetHeight) ? statusBar.offsetHeight : 28;
+        const maxBottom = window.innerHeight - statusBarHeight - 10;
+        const minTop = 10;
+        const minLeft = 10;
+        const maxRight = window.innerWidth - 10;
+
+        balloons.forEach(panel => {
+          if (!panel.offsetParent && panel.style.display === 'none') return;
+          const rect = panel.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return;
+
+          // Adjust vertical position if overflowing bottom
+          if (rect.bottom > maxBottom) {
+            const overflowY = rect.bottom - maxBottom;
+            const currentTop = parseFloat(panel.style.top) || rect.top;
+            const newTop = Math.max(minTop, currentTop - overflowY);
+            if (Math.abs(currentTop - newTop) > 1) {
+              panel.style.top = newTop + 'px';
+            }
+          } else if (rect.top < minTop) {
+            panel.style.top = minTop + 'px';
+          }
+
+          // Adjust horizontal position if overflowing right or left
+          if (rect.right > maxRight) {
+            const overflowX = rect.right - maxRight;
+            const currentLeft = parseFloat(panel.style.left) || rect.left;
+            panel.style.left = Math.max(minLeft, currentLeft - overflowX) + 'px';
+          } else if (rect.left < minLeft) {
+            panel.style.left = minLeft + 'px';
+          }
+        });
+      } finally {
+        _isClamping = false;
+      }
+    }
+
+    // Observe when balloon panels are added, opened or moved
+    const balloonObserver = new MutationObserver(() => {
+      if (!_isClamping) {
+        requestAnimationFrame(clampAllBalloons);
+      }
+    });
+    balloonObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style']
+    });
+
+    window.addEventListener('resize', () => { requestAnimationFrame(clampAllBalloons); });
+    window.addEventListener('scroll', () => { requestAnimationFrame(clampAllBalloons); }, true);
+    document.addEventListener('selectionchange', () => { requestAnimationFrame(clampAllBalloons); });
 
     /* ====== MESSAGE HANDLING (Flutter <-> JS) ====== */
     window.addEventListener('message', (event) => {
