@@ -2634,6 +2634,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 cell.setAttribute('data-formula', formula);
                 cell.setAttribute('title', 'Formula: ' + formula);
                 cell.classList.add('has-formula');
+              } else {
+                cell.removeAttribute('data-formula');
+                cell.removeAttribute('title');
+                cell.classList.remove('has-formula');
               }
               // Clean out any span that might be inside cell
               cell.querySelectorAll('.formula-badge').forEach(b => b.remove());
@@ -3311,14 +3315,46 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               }
             }
 
-            // CRITICAL GUARD AGAINST CLONED ATTRIBUTES:
-            // When CKEditor inserts a row or column, it clones attributes (including dataFormula).
-            // If the cell is completely empty/blank (no badge, blank text, no typed formula):
-            // Strip the cloned attribute immediately so newly inserted rows/cols stay clean!
+            const lastVal = cell.getAttribute ? cell.getAttribute('data-formula-val') : null;
+
+            // 1) If cell has a formula attribute, but the cell was completely cleared/erased:
+            if (attrFormula && (rawText === '' || cleanTxt === '')) {
+              if (cell.removeAttribute) {
+                cell.removeAttribute('data-formula');
+                cell.removeAttribute('title');
+                cell.removeAttribute('data-formula-val');
+                cell.classList.remove('has-formula');
+              }
+              const b = cell.querySelector('.formula-badge');
+              if (b) b.remove();
+              if (editorInstance && editorInstance.model) {
+                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
+              }
+              continue;
+            }
+
+            // 2) If cell has a formula attribute, but user manually edited the cell text to a different static value:
+            if (attrFormula && lastVal !== null && cleanTxt !== lastVal && !cleanTxt.startsWith('=')) {
+              if (cell.removeAttribute) {
+                cell.removeAttribute('data-formula');
+                cell.removeAttribute('title');
+                cell.removeAttribute('data-formula-val');
+                cell.classList.remove('has-formula');
+              }
+              const b = cell.querySelector('.formula-badge');
+              if (b) b.remove();
+              if (editorInstance && editorInstance.model) {
+                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
+              }
+              continue;
+            }
+
+            // 3) Guard against CKEditor attribute cloning on row/col insert:
             if (attrFormula && !hasBadge && rawText === '' && !cleanTxt.startsWith('=')) {
               if (cell.removeAttribute) {
                 cell.removeAttribute('data-formula');
                 cell.removeAttribute('title');
+                cell.removeAttribute('data-formula-val');
                 cell.classList.remove('has-formula');
               }
               const b = cell.querySelector('.formula-badge');
@@ -3483,6 +3519,50 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
+    function ensureFormulaBadgesDOM() {
+      try {
+        const liveTables = getEditorLiveTables();
+        liveTables.forEach((table, tableIdx) => {
+          for (let r = 0; r < table.rows.length; r++) {
+            for (let c = 0; c < table.rows[r].cells.length; c++) {
+              const cell = table.rows[r].cells[c];
+              const formula = getCellFormula(cell, tableIdx, r, c);
+              if (formula && formula.startsWith('=')) {
+                // Remove legacy badge inside p if present
+                const p = cell.querySelector('p');
+                if (p) {
+                  const pBadge = p.querySelector('.formula-badge');
+                  if (pBadge) pBadge.remove();
+                }
+                let badge = cell.querySelector('.formula-badge');
+                if (!badge) {
+                  badge = document.createElement('span');
+                  badge.className = 'formula-badge';
+                  badge.setAttribute('contenteditable', 'false');
+                  badge.setAttribute('data-formula', formula);
+                  badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                  badge.textContent = 'fx';
+                  cell.appendChild(badge);
+                } else {
+                  badge.setAttribute('data-formula', formula);
+                  badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                  if (badge.parentElement !== cell) {
+                    cell.appendChild(badge);
+                  }
+                }
+              } else {
+                const leftovers = cell.querySelectorAll('.formula-badge');
+                leftovers.forEach(b => b.remove());
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('ensureFormulaBadgesDOM error:', e);
+      }
+    }
+    window.ensureFormulaBadgesDOM = ensureFormulaBadgesDOM;
+
     function autoUpdateTableFormulasDOM(forceCell = null) {
       if (window._isUpdatingFormula) return;
       const liveTables = getEditorLiveTables();
@@ -3539,6 +3619,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     const resStr = String(res);
                     liveCell.setAttribute('data-formula', formula);
                     liveCell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
+                    liveCell.setAttribute('data-formula-val', resStr);
                     liveCell.classList.add('has-formula');
 
                     let p = liveCell.querySelector('p');
@@ -3563,7 +3644,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     const oldPBadge = p.querySelector('.formula-badge');
                     if (oldPBadge) oldPBadge.remove();
 
-                    let badge = liveCell.querySelector(':scope > .formula-badge');
+                    let badge = liveCell.querySelector('.formula-badge');
                     if (!badge) {
                       badge = document.createElement('span');
                       badge.className = 'formula-badge';
@@ -3575,6 +3656,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     } else {
                       badge.setAttribute('data-formula', formula);
                       badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                      if (badge.parentElement !== liveCell) {
+                        liveCell.appendChild(badge);
+                      }
                     }
 
                     // Update grid so chained formulas work instantly
@@ -3592,6 +3676,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             pass++;
           }
         });
+
+        // 4. Ensure interactive .formula-badge is present on all formula cells after any model downcast
+        ensureFormulaBadgesDOM();
+        setTimeout(ensureFormulaBadgesDOM, 30);
+        setTimeout(ensureFormulaBadgesDOM, 100);
 
         if (anyUpdated) {
           postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
@@ -3683,21 +3772,6 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
-    // Double-click on any formula cell opens the formula editor
-    document.addEventListener('dblclick', function(e) {
-      const cell = e.target.closest('td, th');
-      if (cell) {
-        const isFormula = cell.classList.contains('has-formula') || cell.hasAttribute('data-formula') || getCellFormula(cell);
-        if (isFormula) {
-          e.preventDefault();
-          e.stopPropagation();
-          window._targetFormulaCell = cell;
-          lastActiveTableCell = cell;
-          openCellFormulaEditor(cell);
-        }
-      }
-    }, true);
-
     function showFormulaHelpModal() {
       let cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
       if (!cell || !document.contains(cell)) {
@@ -3782,6 +3856,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
       closeFormulaHelpModal();
       autoUpdateTableFormulasDOM(cell);
+      ensureFormulaBadgesDOM();
+      setTimeout(ensureFormulaBadgesDOM, 30);
+      setTimeout(ensureFormulaBadgesDOM, 100);
       showToastMsg('⚡ Formula applied: ' + formula);
       postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
     }
@@ -3800,6 +3877,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
         cell.removeAttribute('data-formula');
         cell.removeAttribute('title');
+        cell.removeAttribute('data-formula-val');
         cell.classList.remove('has-formula');
         const badge = cell.querySelector('.formula-badge');
         if (badge) badge.remove();
@@ -3809,6 +3887,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         if (editorInstance && editorInstance.model) {
           _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
         }
+        ensureFormulaBadgesDOM();
+        setTimeout(ensureFormulaBadgesDOM, 30);
 
         showToastMsg('🗑 Formula removed; cell is now static number');
         postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
