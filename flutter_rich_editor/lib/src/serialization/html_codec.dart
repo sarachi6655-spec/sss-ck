@@ -393,8 +393,18 @@ class HtmlDocumentCodec {
         final String? rowspan = cell.attributes['rowspan'];
         final String? cellStyle = cell.attributes['style'];
         final String? cellClass = cell.attributes['class'];
-        final String? cellFormula = cell.attributes['data-formula'];
-        final String? cellTitle = cell.attributes['title'];
+        String? cellFormula = cell.attributes['data-formula'] ?? cell.querySelector('[data-formula]')?.attributes['data-formula'];
+        final String? cellTitle = cell.attributes['title'] ?? cell.querySelector('[title*="Formula:"]')?.attributes['title'];
+        if ((cellFormula == null || cellFormula.isEmpty) && cellTitle != null && cellTitle.contains('Formula:')) {
+          final int idx = cellTitle.indexOf('Formula:');
+          String cand = cellTitle.substring(idx + 8).trim();
+          if (cand.contains('(')) {
+            final int parenIdx = cand.indexOf('(');
+            final String beforeParen = cand.substring(0, parenIdx).trim();
+            if (beforeParen.startsWith('=')) cand = beforeParen;
+          }
+          if (cand.startsWith('=')) cellFormula = cand;
+        }
 
         cellNodes.add(EditorNode(
           id: 'cell_${r}_$c',

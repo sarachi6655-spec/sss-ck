@@ -666,36 +666,79 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       background: rgba(100, 116, 139, 0.9) !important;
     }
 
-    /* Table insertion grid popup - NEVER clip horizontally or vertically */
+    /* Table insertion grid popup - exact 10x10 matrix layout */
+    :root {
+      --ck-insert-table-dropdown-padding: 8px;
+      --ck-insert-table-dropdown-box-height: 18px;
+      --ck-insert-table-dropdown-box-width: 18px;
+      --ck-insert-table-dropdown-box-margin: 2px;
+    }
+
     .ck.ck-insert-table-dropdown .ck-dropdown__panel,
     .ck-insert-table-dropdown .ck-dropdown__panel,
-    .ck.ck-dropdown__panel:has(.ck-table-grid),
-    .ck.ck-dropdown__panel:has(.ck-insert-table-dropdown-grid) {
+    .ck.ck-dropdown__panel:has(.ck-insert-table-dropdown__grid) {
       max-height: none !important;
       height: auto !important;
-      width: auto !important;
-      max-width: none !important;
-      min-width: 230px !important;
+      width: 256px !important;
+      min-width: 256px !important;
+      max-width: 256px !important;
       overflow: visible !important;
       overflow-x: visible !important;
       overflow-y: visible !important;
+      padding: 4px !important;
+      box-sizing: border-box !important;
     }
-    .ck-table-grid,
-    .ck-insert-table-dropdown-grid {
+
+    .ck .ck-insert-table-dropdown__grid {
+      display: flex !important;
+      flex-direction: row !important;
+      flex-wrap: wrap !important;
+      width: 240px !important;
+      min-width: 240px !important;
+      max-width: 240px !important;
+      height: 240px !important;
+      min-height: 240px !important;
+      max-height: 240px !important;
+      padding: 10px 10px 0 !important;
+      margin: 0 auto !important;
       overflow: visible !important;
-      width: auto !important;
-      padding: 8px !important;
+      box-sizing: border-box !important;
     }
-    .ck-table-grid__tiles,
-    .ck-insert-table-dropdown-grid-tiles {
-      overflow: visible !important;
-      display: grid !important;
+
+    /* Override any global .ck.ck-button dimensions so 10x10 grid tiles stay exactly 18x18 */
+    .ck.ck-button.ck-insert-table-dropdown-grid-box,
+    .ck .ck-insert-table-dropdown-grid-box {
+      width: 18px !important;
+      height: 18px !important;
+      min-width: 18px !important;
+      max-width: 18px !important;
+      min-height: 18px !important;
+      max-height: 18px !important;
+      padding: 0 !important;
+      margin: 2px !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 2px !important;
+      background: #ffffff !important;
+      outline: none !important;
+      box-sizing: border-box !important;
+      transition: background-color 0.1s ease, border-color 0.1s ease !important;
+      cursor: pointer !important;
     }
-    .ck-table-grid__label {
-      padding: 6px 4px 2px !important;
+
+    .ck.ck-button.ck-insert-table-dropdown-grid-box.ck-on,
+    .ck .ck-insert-table-dropdown-grid-box.ck-on {
+      background: #bfdbfe !important;
+      border-color: #2563eb !important;
+    }
+
+    .ck .ck-insert-table-dropdown__label {
+      padding: 6px 4px 6px !important;
       text-align: center !important;
-      font-size: 12px !important;
-      font-weight: 500 !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      color: #1e293b !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
     }
 
     /* Nested dropdowns inside grouped dropdown or split buttons */
@@ -1054,12 +1097,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:14px;font-size:13px;">
         <div style="font-weight:600;margin-bottom:6px;color:#1e293b;">📍 How Cell Coordinates Work</div>
         <p style="margin:0 0 6px 0;color:#64748b;font-size:12px;">Columns are letters (<strong>A, B, C...</strong>) and rows are numbers (<strong>1, 2, 3...</strong>):</p>
-        <table style="width:100%;border-collapse:collapse;margin:4px 0;background:white;font-size:12px;" border="1">
-          <tr style="background:#f1f5f9;"><th style="padding:5px;"></th><th style="padding:5px;">Column A</th><th style="padding:5px;">Column B</th></tr>
-          <tr><td style="background:#f1f5f9;font-weight:600;padding:5px;text-align:center;">Row 1</td><td style="padding:5px;">Cell <strong>A1</strong> (e.g. 120)</td><td style="padding:5px;">Cell <strong>B1</strong></td></tr>
-          <tr><td style="background:#f1f5f9;font-weight:600;padding:5px;text-align:center;">Row 2</td><td style="padding:5px;">Cell <strong>A2</strong> (e.g. 230)</td><td style="padding:5px;">Cell <strong>B2</strong></td></tr>
-          <tr><td style="background:#f1f5f9;font-weight:600;padding:5px;text-align:center;">Row 3</td><td style="padding:5px;background:#eff6ff;">Cell <strong>A3</strong> (e.g. <code>=SUM(A1+A2)</code>)</td><td style="padding:5px;">Cell <strong>B3</strong></td></tr>
-        </table>
+        <div style="display:grid;grid-template-columns:70px 1fr 1fr;gap:1px;background:#cbd5e1;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;margin:6px 0;font-size:12px;">
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;"></div>
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;">Column A</div>
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;">Column B</div>
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;">Row 1</div>
+          <div style="background:#ffffff;padding:6px;">Cell <strong>A1</strong> (e.g. 120)</div>
+          <div style="background:#ffffff;padding:6px;">Cell <strong>B1</strong></div>
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;">Row 2</div>
+          <div style="background:#ffffff;padding:6px;">Cell <strong>A2</strong> (e.g. 230)</div>
+          <div style="background:#ffffff;padding:6px;">Cell <strong>B2</strong></div>
+          <div style="background:#f1f5f9;padding:6px;font-weight:600;text-align:center;">Row 3</div>
+          <div style="background:#eff6ff;padding:6px;">Cell <strong>A3</strong> (e.g. <code>=SUM(A1+A2)</code>)</div>
+          <div style="background:#ffffff;padding:6px;">Cell <strong>B3</strong></div>
+        </div>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:8px;font-size:13px;margin-bottom:16px;">
@@ -1549,6 +1600,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         .then(editor => {
           editorInstance = editor;
           window.editorInstance = editor;
+
+          /* Register dataFormula attribute on tableCell so CKEditor preserves it in model & view */
+          try {
+            editor.model.schema.extend('tableCell', { allowAttributes: ['dataFormula'] });
+            editor.conversion.attributeToAttribute({
+              model: 'dataFormula',
+              view: 'data-formula'
+            });
+          } catch (e) {
+            console.warn('dataFormula schema registration error:', e);
+          }
+
           if (initialContent) {
             extractAndSeedFormulasFromHtml(initialContent);
             editor.setData(initialContent);
@@ -1556,6 +1619,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
             }, 100);
+            setTimeout(() => {
+              scanAndRegisterTableFormulas();
+              evaluateAllTableFormulas(false);
+            }, 350);
           }
 
           /* Set up Base64 image upload adapter */
@@ -1563,9 +1630,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             return new Base64UploadAdapter(loader);
           };
 
-          /* Content change listener */
+          /* Content change listener - always use getEditorData() to preserve table formulas */
           editor.model.document.on('change:data', () => {
-            const data = editor.getData();
+            const data = getEditorData();
             postToFlutter({ type: 'ckeditor_change', html: data });
             updateParaCount();
             updatePageIndicator();
@@ -2156,6 +2223,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     /* ====== HELPERS ====== */
+    /* Dedicated helper: selects only editor tables and ignores any tables in modals or popups */
+    function getEditorLiveTables() {
+      const tables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table'));
+      return tables.filter(t => !t.closest('.modal-overlay') && !t.closest('.modal-box') && !t.closest('.ck-dropdown'));
+    }
+
     function injectFormulasIntoHtml(html) {
       if (!html || typeof html !== 'string' || html.indexOf('<table') === -1) return html;
       try {
@@ -2164,7 +2237,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         const tables = doc.querySelectorAll('table');
         if (tables.length === 0) return html;
 
-        const liveTables = document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table');
+        const liveTables = getEditorLiveTables();
 
         tables.forEach((t, tIdx) => {
           const liveT = liveTables[tIdx];
@@ -2180,8 +2253,22 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               } else if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
                 const liveC = liveT.rows[r].cells[c];
                 formula = liveC.getAttribute('data-formula') || (liveC.querySelector('[data-formula]') ? liveC.querySelector('[data-formula]').getAttribute('data-formula') : null);
+                if (!formula && liveC.getAttribute('title')) {
+                  const title = liveC.getAttribute('title') || '';
+                  const idx = title.indexOf('Formula:');
+                  if (idx !== -1) formula = title.substring(idx + 8).trim();
+                }
+              } else if (cell.getAttribute('data-formula')) {
+                formula = cell.getAttribute('data-formula');
+              } else if (cell.getAttribute('title')) {
+                const title = cell.getAttribute('title') || '';
+                const idx = title.indexOf('Formula:');
+                if (idx !== -1) formula = title.substring(idx + 8).trim();
               }
+              if (formula) formula = cleanFormulaText(formula);
               if (formula && formula.startsWith('=')) {
+                window._tableFormulaRegistry = window._tableFormulaRegistry || {};
+                window._tableFormulaRegistry[regKey] = formula;
                 cell.setAttribute('data-formula', formula);
                 cell.setAttribute('title', 'Formula: ' + formula);
                 cell.classList.add('has-formula');
@@ -2240,6 +2327,19 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 const idx = title.indexOf('Formula:');
                 if (idx !== -1) formula = title.substring(idx + 8).trim();
               }
+              if (!formula) {
+                const childT = cell.querySelector('[title*="Formula:"]');
+                if (childT) {
+                  const title = childT.getAttribute('title') || '';
+                  const idx = title.indexOf('Formula:');
+                  if (idx !== -1) formula = title.substring(idx + 8).trim();
+                }
+              }
+              if (!formula) {
+                const rawTxt = (cell.innerText || cell.textContent || '').trim();
+                const cleanTxt = cleanFormulaText(rawTxt);
+                if (cleanTxt.startsWith('=')) formula = cleanTxt;
+              }
               if (formula) {
                 const cleanF = cleanFormulaText(formula);
                 if (cleanF.startsWith('=')) {
@@ -2266,6 +2366,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
         }, 300);
+        setTimeout(() => {
+          scanAndRegisterTableFormulas();
+          evaluateAllTableFormulas(false);
+        }, 600);
       } else if (isFallback) {
         document.getElementById('fallback-content').innerHTML = html;
         setTimeout(() => {
@@ -2737,7 +2841,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     window._tableFormulaRegistry = window._tableFormulaRegistry || {};
 
     function scanAndRegisterTableFormulas() {
-      const liveTables = document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table');
+      const liveTables = getEditorLiveTables();
       liveTables.forEach((table, tableIdx) => {
         const rows = table.rows;
         if (!rows) return;
@@ -2757,20 +2861,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
               const f = cleanFormulaText(cell.getAttribute('data-formula'));
               if (f.startsWith('=')) {
-                // Only if user is actively focused inside this exact cell and manually erased or replaced the formula
-                if (isCurrentlyFocused && cleanTxt && !cleanTxt.startsWith('=') && !rawText.includes('fx')) {
-                  delete window._tableFormulaRegistry[regKey];
-                  cell.removeAttribute('data-formula');
-                  cell.removeAttribute('title');
-                  cell.classList.remove('has-formula');
-                  const badge = cell.querySelector('.formula-badge');
-                  if (badge) badge.remove();
-                } else {
-                  window._tableFormulaRegistry[regKey] = f;
-                  cell.setAttribute('data-formula', f);
-                  cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
-                  cell.classList.add('has-formula');
-                }
+                window._tableFormulaRegistry[regKey] = f;
+                cell.setAttribute('data-formula', f);
+                cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
+                cell.classList.add('has-formula');
               }
             } else if (cell.querySelector) {
               const elF = cell.querySelector('[data-formula]');
@@ -2799,13 +2893,26 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 }
               }
             }
-            // Preserve if already in registry
+            // Preserve if already in registry and ensure badge exists
             if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
               const f = window._tableFormulaRegistry[regKey];
               if (f && f.startsWith('=')) {
                 cell.setAttribute('data-formula', f);
                 cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
                 cell.classList.add('has-formula');
+                let badge = cell.querySelector('.formula-badge');
+                if (!badge) {
+                  const p = cell.querySelector('p') || cell;
+                  const span = document.createElement('span');
+                  span.className = 'formula-badge';
+                  span.setAttribute('data-formula', f);
+                  span.setAttribute('title', 'Formula: ' + f + ' (Click to edit)');
+                  span.textContent = 'fx';
+                  p.appendChild(span);
+                } else {
+                  badge.setAttribute('data-formula', f);
+                  badge.setAttribute('title', 'Formula: ' + f + ' (Click to edit)');
+                }
               }
             }
           }
@@ -2897,6 +3004,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     const p = writer.createElement('paragraph');
                     writer.insert(p, targetCell, 0);
                     writer.insertText(resStr, { bold: true }, p, 0);
+                    if (formula) {
+                      try {
+                        writer.setAttribute('dataFormula', formula, targetCell);
+                      } catch (e) {}
+                    }
                   });
                 }
               }
@@ -2911,7 +3023,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function autoUpdateTableFormulasDOM() {
-      const liveTables = document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table');
+      const liveTables = getEditorLiveTables();
       if (liveTables.length === 0) return;
 
       scanAndRegisterTableFormulas();
@@ -3015,7 +3127,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     function syncAllModelFormulaCells() {
       if (!editorInstance || !editorInstance.model) return;
       try {
-        const liveTables = document.querySelectorAll('.ck-content table, .ck-editor__editable table');
+        const liveTables = getEditorLiveTables();
         liveTables.forEach((table, tableIdx) => {
           for (let r = 0; r < table.rows.length; r++) {
             for (let c = 0; c < table.rows[r].cells.length; c++) {
@@ -3115,7 +3227,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
       // Update registry
       const table = cell.closest('table');
-      const liveTables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table'));
+      const liveTables = getEditorLiveTables();
       const tableIdx = Math.max(0, liveTables.indexOf(table));
       const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
       const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
@@ -3132,7 +3244,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const cell = getActiveTableCell();
       if (cell) {
         const table = cell.closest('table');
-        const liveTables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table'));
+        const liveTables = getEditorLiveTables();
         const tableIdx = Math.max(0, liveTables.indexOf(table));
         const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
         const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
@@ -3252,7 +3364,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const table = cell.closest('table');
       if (!table) return;
 
-      const liveTables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table, table'));
+      const liveTables = getEditorLiveTables();
       const tableIdx = Math.max(0, liveTables.indexOf(table));
       const colIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
       const row = cell.closest('tr');
@@ -3507,7 +3619,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
       if (editorInstance) {
         try {
-          const html = editorInstance.getData();
+          const html = getEditorData();
           postToFlutter({ type: 'ckeditor_change', html: html });
         } catch(e) {}
       }
@@ -3536,7 +3648,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         });
         if (editorInstance) {
           try {
-            const html = editorInstance.getData();
+            const html = getEditorData();
             postToFlutter({ type: 'ckeditor_change', html: html });
           } catch(e) {}
         }
@@ -3733,7 +3845,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       showVideoToolbar(activeMediaFigure);
       if (editorInstance) {
         try {
-          const html = editorInstance.getData();
+          const html = getEditorData();
           postToFlutter({ type: 'ckeditor_change', html: html });
         } catch(e) {}
       }
@@ -3754,7 +3866,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       showVideoToolbar(activeMediaFigure);
       if (editorInstance) {
         try {
-          const html = editorInstance.getData();
+          const html = getEditorData();
           postToFlutter({ type: 'ckeditor_change', html: html });
         } catch(e) {}
       }
@@ -3767,7 +3879,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       activeMediaFigure = null;
       if (editorInstance) {
         try {
-          const html = editorInstance.getData();
+          const html = getEditorData();
           postToFlutter({ type: 'ckeditor_change', html: html });
         } catch(e) {}
       }
@@ -3806,7 +3918,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               document.removeEventListener('mouseup', onMouseUp);
               if (editorInstance) {
                 try {
-                  const html = editorInstance.getData();
+                  const html = getEditorData();
                   postToFlutter({ type: 'ckeditor_change', html: html });
                 } catch(e) {}
               }
