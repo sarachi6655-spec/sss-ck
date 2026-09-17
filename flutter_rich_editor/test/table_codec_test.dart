@@ -32,4 +32,37 @@ void main() {
     expect(encoded.contains('data-formula="=A1+B1"'), isTrue);
     expect(encoded.contains('title="Formula: =A1+B1"'), isTrue);
   });
+
+  test('Table formula roundtrip reload from saved database HTML test', () {
+    const codec = HtmlDocumentCodec();
+    // Simulate HTML saved to database with formula and fx badge
+    const savedHtmlFromDb = '<figure class="table"><table><tbody><tr><td>23</td></tr><tr><td>1</td></tr><tr><td data-formula="=SUM(A1+A2)" title="Formula: =SUM(A1+A2) (Click fx to edit)" class="has-formula"><p><strong data-formula="=SUM(A1+A2)">24</strong> <span class="formula-badge" data-formula="=SUM(A1+A2)" title="Formula: =SUM(A1+A2)">fx</span></p></td></tr></tbody></table></figure>';
+
+    // 1. App fetches from database and loads into codec/controller
+    final doc = codec.decode(savedHtmlFromDb);
+    final tableNode = doc.nodes.first;
+    final row3 = tableNode.children[2];
+    final formulaCell = row3.children[0];
+
+    // Verify formula is perfectly decoded
+    expect(formulaCell.metadata['data-formula'], '=SUM(A1+A2)');
+    expect(formulaCell.metadata['title'], 'Formula: =SUM(A1+A2) (Click fx to edit)');
+
+    // 2. Controller encodes HTML for CKEditor iframe initialContent
+    final reloadedHtml = codec.encode(doc);
+    expect(reloadedHtml.contains('data-formula="=SUM(A1+A2)"'), isTrue);
+    expect(reloadedHtml.contains('title="Formula: =SUM(A1+A2) (Click fx to edit)"'), isTrue);
+
+    // 3. Fallback test: even if data-formula attribute was missing but child badge has it
+    const htmlWithChildBadgeOnly = '<figure class="table"><table><tbody><tr><td>23</td></tr><tr><td>1</td></tr><tr><td><p><strong>24</strong> <span class="formula-badge" data-formula="=SUM(A1+A2)" title="Formula: =SUM(A1+A2)">fx</span></p></td></tr></tbody></table></figure>';
+    final docFallback = codec.decode(htmlWithChildBadgeOnly);
+    final fallbackCell = docFallback.nodes.first.children[2].children[0];
+    expect(fallbackCell.metadata['data-formula'], '=SUM(A1+A2)');
+
+    // 4. Fallback test: even if only title has Formula:
+    const htmlWithTitleOnly = '<figure class="table"><table><tbody><tr><td>23</td></tr><tr><td>1</td></tr><tr><td title="Formula: =SUM(A1+A2) (Click fx to edit)"><p><strong>24</strong></p></td></tr></tbody></table></figure>';
+    final docTitleFallback = codec.decode(htmlWithTitleOnly);
+    final titleCell = docTitleFallback.nodes.first.children[2].children[0];
+    expect(titleCell.metadata['data-formula'], '=SUM(A1+A2)');
+  });
 }

@@ -398,10 +398,9 @@ class HtmlDocumentCodec {
         if ((cellFormula == null || cellFormula.isEmpty) && cellTitle != null && cellTitle.contains('Formula:')) {
           final int idx = cellTitle.indexOf('Formula:');
           String cand = cellTitle.substring(idx + 8).trim();
-          if (cand.contains('(')) {
-            final int parenIdx = cand.indexOf('(');
-            final String beforeParen = cand.substring(0, parenIdx).trim();
-            if (beforeParen.startsWith('=')) cand = beforeParen;
+          final int clickIdx = cand.toLowerCase().indexOf('(click');
+          if (clickIdx != -1) {
+            cand = cand.substring(0, clickIdx).trim();
           }
           if (cand.startsWith('=')) cellFormula = cand;
         }
