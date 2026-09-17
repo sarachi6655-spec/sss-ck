@@ -272,27 +272,34 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content table td.has-formula, .ck-content table th.has-formula,
     .ck-content table td[data-formula], .ck-content table th[data-formula] {
       position: relative !important;
+      background-color: #f8faff !important;
     }
-    .ck-content table td.has-formula::after,
-    .ck-content table th.has-formula::after,
-    .ck-content table td[data-formula]::after,
-    .ck-content table th[data-formula]::after {
-      content: "fx" !important;
-      display: inline-block !important;
+    .formula-badge {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
       font-size: 10px !important;
-      padding: 1px 5px !important;
+      line-height: 1 !important;
+      padding: 2px 5px !important;
       background: #eff6ff !important;
       color: #1d4ed8 !important;
-      border: 1px solid #bfdbfe !important;
+      border: 1px solid #93c5fd !important;
       border-radius: 4px !important;
       font-weight: 700 !important;
       margin-left: 6px !important;
       user-select: none !important;
       vertical-align: middle !important;
-      line-height: 1.2 !important;
       cursor: pointer !important;
+      box-shadow: 0 1px 2px rgba(37, 99, 235, 0.1) !important;
+      transition: all 0.15s ease !important;
     }
-    .formula-badge { display: none !important; }
+    .formula-badge:hover {
+      background: #2563eb !important;
+      color: #ffffff !important;
+      border-color: #1d4ed8 !important;
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25) !important;
+      transform: scale(1.08) !important;
+    }
     /* Highlight */
     .ck-content mark, .ck-content .marker-yellow { background: #fef08a; }
     .ck-content .marker-green { background: #bbf7d0; }
@@ -758,23 +765,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       overflow: visible !important;
     }
 
-    /* Balloon Panels (Table Toolbar, Table Properties, Cell Properties, Link Balloon, etc.) */
+    /* Balloon Panels Base */
     .ck.ck-balloon-panel,
     .ck-balloon-panel {
+      z-index: 10000 !important;
+    }
+
+    /* Only Form/Dialog Balloons (Table Properties, Cell Properties, Link Form) get card styling and scroll */
+    .ck.ck-balloon-panel:has(.ck-form),
+    .ck.ck-balloon-panel:has(.ck-table-properties-form),
+    .ck.ck-balloon-panel:has(.ck-table-cell-properties-form),
+    .ck.ck-balloon-panel_with-form {
       max-width: min(520px, calc(100vw - 16px)) !important;
       max-height: calc(100vh - 48px) !important;
       box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.12) !important;
       border-radius: 10px !important;
       border: 1px solid #cbd5e1 !important;
-      z-index: 10000 !important;
       display: flex !important;
       flex-direction: column !important;
       overflow: hidden !important;
       background: #ffffff !important;
     }
 
-    .ck.ck-balloon-panel .ck-balloon-panel__content,
-    .ck-balloon-panel .ck-balloon-panel__content {
+    .ck.ck-balloon-panel:has(.ck-form) .ck-balloon-panel__content,
+    .ck.ck-balloon-panel:has(.ck-table-properties-form) .ck-balloon-panel__content,
+    .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) .ck-balloon-panel__content,
+    .ck.ck-balloon-panel_with-form .ck-balloon-panel__content {
       max-height: calc(100vh - 60px) !important;
       overflow-y: auto !important;
       overflow-x: hidden !important;
@@ -785,12 +801,85 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       padding: 0 !important;
     }
 
-    .ck.ck-balloon-panel .ck-balloon-panel__content::-webkit-scrollbar {
+    .ck.ck-balloon-panel:has(.ck-form) .ck-balloon-panel__content::-webkit-scrollbar,
+    .ck.ck-balloon-panel:has(.ck-table-properties-form) .ck-balloon-panel__content::-webkit-scrollbar,
+    .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) .ck-balloon-panel__content::-webkit-scrollbar {
       width: 5px;
     }
-    .ck.ck-balloon-panel .ck-balloon-panel__content::-webkit-scrollbar-thumb {
+    .ck.ck-balloon-panel:has(.ck-form) .ck-balloon-panel__content::-webkit-scrollbar-thumb,
+    .ck.ck-balloon-panel:has(.ck-table-properties-form) .ck-balloon-panel__content::-webkit-scrollbar-thumb,
+    .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) .ck-balloon-panel__content::-webkit-scrollbar-thumb {
       background: #cbd5e1;
       border-radius: 4px;
+    }
+
+    /* Contextual Toolbars (Table Toolbar, etc.) MUST be visible and horizontal */
+    .ck.ck-balloon-panel:not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) {
+      overflow: visible !important;
+      max-width: none !important;
+      max-height: none !important;
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+
+    .ck.ck-balloon-panel:not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) .ck-balloon-panel__content {
+      overflow: visible !important;
+      max-height: none !important;
+      padding: 0 !important;
+    }
+
+    .ck.ck-balloon-panel .ck-toolbar {
+      overflow: visible !important;
+      display: flex !important;
+      flex-direction: row !important;
+      flex-wrap: nowrap !important;
+      align-items: center !important;
+      border-radius: 8px !important;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16), 0 2px 6px rgba(0, 0, 0, 0.08) !important;
+      border: 1px solid #cbd5e1 !important;
+      background: #ffffff !important;
+      padding: 3px 6px !important;
+    }
+
+    .ck.ck-balloon-panel .ck-toolbar .ck-toolbar__items {
+      overflow: visible !important;
+      display: flex !important;
+      flex-direction: row !important;
+      flex-wrap: nowrap !important;
+      align-items: center !important;
+      gap: 2px !important;
+    }
+
+    /* Dropdown panels inside contextual toolbars (Row options, Column options, etc.) */
+    .ck.ck-balloon-panel .ck-dropdown__panel {
+      position: absolute !important;
+      overflow: visible !important;
+      z-index: 10005 !important;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18) !important;
+      border-radius: 8px !important;
+      border: 1px solid #cbd5e1 !important;
+      background: #ffffff !important;
+      max-height: min(400px, 80vh) !important;
+    }
+
+    .ck.ck-balloon-panel .ck-dropdown__panel .ck-list {
+      max-height: min(380px, 75vh) !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      padding: 4px 0 !important;
+    }
+
+    .ck.ck-balloon-panel .ck-dropdown__panel .ck-list__item {
+      min-width: 170px !important;
+    }
+
+    .ck.ck-balloon-panel .ck-dropdown__panel .ck-button {
+      padding: 6px 12px !important;
+      font-size: 13px !important;
+      width: 100% !important;
+      justify-content: flex-start !important;
+      text-align: left !important;
     }
 
     /* Table Properties & Cell Properties Form Polish */
@@ -889,12 +978,21 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       border-color: #94a3b8 !important;
     }
 
-    /* Dark mode for balloon forms */
-    body.dark .ck.ck-balloon-panel,
-    body.dark .ck-balloon-panel {
+    /* Dark mode for balloon forms and toolbars */
+    body.dark .ck.ck-balloon-panel:has(.ck-form),
+    body.dark .ck.ck-balloon-panel:has(.ck-table-properties-form),
+    body.dark .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) {
       background: #1e1e2e !important;
       border-color: #45475a !important;
       box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4) !important;
+    }
+    body.dark .ck.ck-balloon-panel .ck-toolbar {
+      background: #1e1e2e !important;
+      border-color: #45475a !important;
+    }
+    body.dark .ck.ck-balloon-panel .ck-dropdown__panel {
+      background: #1e1e2e !important;
+      border-color: #45475a !important;
     }
     body.dark .ck.ck-form__header {
       border-color: #313244 !important;
@@ -1351,6 +1449,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             <button type="button" onclick="applyTextColor('#0f172a')" style="padding:2px 6px;font-size:10.5px;border:1px solid #cbd5e1;background:#fff;border-radius:4px;cursor:pointer;">Dark</button>
             <button type="button" onclick="applyTextColor('#ffffff')" style="padding:2px 6px;font-size:10.5px;border:1px solid #475569;background:#1e293b;color:#fff;border-radius:4px;cursor:pointer;">White</button>
           </div>
+        </div>
+      </div>
+
+      <!-- 3. Row & Column Quick Actions -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px;">
+        <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:6px;color:#334155;">3. Row &amp; Column Quick Actions:</label>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;">
+          <button type="button" onclick="insertTableRow(true)" style="padding:4px 8px;font-size:11px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:500;">⬆️ Row Above</button>
+          <button type="button" onclick="insertTableRow(false)" style="padding:4px 8px;font-size:11px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:500;">⬇️ Row Below</button>
+          <button type="button" onclick="deleteTableRow()" style="padding:4px 8px;font-size:11px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-weight:500;">🗑️ Del Row</button>
+          <button type="button" onclick="insertTableColumn(true)" style="padding:4px 8px;font-size:11px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:500;">⬅️ Col Left</button>
+          <button type="button" onclick="insertTableColumn(false)" style="padding:4px 8px;font-size:11px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:500;">➡️ Col Right</button>
+          <button type="button" onclick="deleteTableColumn()" style="padding:4px 8px;font-size:11px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:4px;cursor:pointer;font-weight:500;">🗑️ Del Col</button>
+          <button type="button" onclick="closeTableColorModal();showFormulaHelpModal();" style="padding:4px 8px;font-size:11px;background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;border-radius:4px;cursor:pointer;font-weight:600;">🧮 Formula</button>
         </div>
       </div>
 
@@ -3072,12 +3184,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           for (let c = 0; c < rows[r].cells.length; c++) {
             const cell = rows[r].cells[c];
             const regKey = tableIdx + '_' + r + '_' + c;
-            const rawText = (cell.innerText || cell.textContent || '').trim();
+            let rawText = '';
+            for (let n of cell.childNodes) {
+              if (n.classList && n.classList.contains('formula-badge')) continue;
+              rawText += (n.innerText || n.textContent || '');
+            }
+            rawText = rawText.replace(/\bfx\b/gi, '').trim();
             const cleanTxt = cleanFormulaText(rawText);
-
-            // Remove legacy .formula-badge if present
-            const legacyBadge = cell.querySelector('.formula-badge');
-            if (legacyBadge) legacyBadge.remove();
 
             let formula = null;
             if (cleanTxt.startsWith('=')) {
@@ -3103,7 +3216,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             if (formula && formula.startsWith('=')) {
               window._tableFormulaRegistry[regKey] = formula;
               cell.setAttribute('data-formula', formula);
-              cell.setAttribute('title', 'Formula: ' + formula);
+              cell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
               cell.classList.add('has-formula');
             }
           }
@@ -3264,27 +3377,40 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 if (res !== null) {
                   const resStr = String(res);
                   liveCell.setAttribute('data-formula', formula);
-                  liveCell.setAttribute('title', 'Formula: ' + formula);
+                  liveCell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
                   liveCell.classList.add('has-formula');
 
-                  // Remove any legacy .formula-badge spans
-                  liveCell.querySelectorAll('.formula-badge').forEach(b => b.remove());
-
-                  const strong = liveCell.querySelector('strong');
-                  if (strong) {
-                    if (strong.textContent !== resStr) {
-                      strong.textContent = resStr;
-                      strong.setAttribute('data-formula', formula);
-                      anyUpdated = true;
-                    }
-                  } else {
-                    const p = liveCell.querySelector('p');
-                    if (p) {
-                      p.innerHTML = '<strong data-formula="' + formula + '">' + resStr + '</strong>';
-                    } else {
-                      liveCell.innerHTML = '<p><strong data-formula="' + formula + '">' + resStr + '</strong></p>';
-                    }
+                  let p = liveCell.querySelector('p');
+                  if (!p) {
+                    p = document.createElement('p');
+                    liveCell.innerHTML = '';
+                    liveCell.appendChild(p);
+                  }
+                  let strong = p.querySelector('strong');
+                  if (!strong) {
+                    strong = document.createElement('strong');
+                    p.prepend(strong);
+                  }
+                  if (strong.textContent !== resStr) {
+                    strong.textContent = resStr;
                     anyUpdated = true;
+                  }
+                  strong.setAttribute('data-formula', formula);
+
+                  // Ensure interactive .formula-badge is present in live editor DOM
+                  let badge = p.querySelector('.formula-badge') || liveCell.querySelector('.formula-badge');
+                  if (!badge) {
+                    badge = document.createElement('span');
+                    badge.className = 'formula-badge';
+                    badge.setAttribute('contenteditable', 'false');
+                    badge.setAttribute('data-formula', formula);
+                    badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                    badge.textContent = 'fx';
+                    p.appendChild(badge);
+                  } else {
+                    badge.setAttribute('data-formula', formula);
+                    badge.title = 'Formula: ' + formula + ' (Click to edit)';
+                    if (badge.parentElement !== p) p.appendChild(badge);
                   }
 
                   // Update grid so chained formulas work instantly
@@ -3358,38 +3484,44 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
-    // Click on fx badge or formula cell to open formula editor modal
+    // Click on fx badge to open formula editor modal
     document.addEventListener('click', function(e) {
       const cell = e.target.closest('td, th');
       if (cell) {
         lastActiveTableCell = cell;
-        const isFormula = cell.classList.contains('has-formula') || cell.hasAttribute('data-formula') || (cell.getAttribute('title') || '').indexOf('Formula:') !== -1;
-        if (isFormula) {
-          const rect = cell.getBoundingClientRect();
-          // If clicked within 35px of the right edge where fx pseudo badge is rendered
-          if (e.clientX >= rect.right - 35 && e.clientX <= rect.right) {
-            e.preventDefault();
-            e.stopPropagation();
-            openCellFormulaEditor(cell);
-            return;
-          }
-        }
       }
       const badge = e.target.closest('.formula-badge');
       if (badge) {
         e.preventDefault();
         e.stopPropagation();
-        const c = badge.closest('td, th');
-        if (c) {
-          lastActiveTableCell = c;
-          openCellFormulaEditor(c);
+        const targetCell = badge.closest('td, th') || cell;
+        if (targetCell) {
+          window._targetFormulaCell = targetCell;
+          lastActiveTableCell = targetCell;
+          openCellFormulaEditor(targetCell);
+        }
+        return;
+      }
+    }, true);
+
+    // Double-click on any formula cell opens the formula editor
+    document.addEventListener('dblclick', function(e) {
+      const cell = e.target.closest('td, th');
+      if (cell) {
+        const isFormula = cell.classList.contains('has-formula') || cell.hasAttribute('data-formula') || getCellFormula(cell);
+        if (isFormula) {
+          e.preventDefault();
+          e.stopPropagation();
+          window._targetFormulaCell = cell;
+          lastActiveTableCell = cell;
+          openCellFormulaEditor(cell);
         }
       }
     }, true);
 
     function showFormulaHelpModal() {
-      const cell = getActiveTableCell();
-      if (!cell) {
+      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      if (!cell || !document.contains(cell)) {
         showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
         return;
       }
@@ -3397,28 +3529,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function openCellFormulaEditor(cell) {
+      if (!cell) {
+        cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      }
+      if (!cell || !document.contains(cell)) {
+        showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
+        return;
+      }
+      window._targetFormulaCell = cell;
+      lastActiveTableCell = cell;
+
       const modal = document.getElementById('formula-modal');
       const input = document.getElementById('formula-editor-input');
       const coordLabel = document.getElementById('formula-cell-coord');
       const title = document.getElementById('formula-modal-title');
 
-      if (cell) {
-        lastActiveTableCell = cell;
-        const row = cell.closest('tr');
-        const rIdx = row ? row.rowIndex : 0;
-        const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
-        const colLetter = String.fromCharCode(65 + (cIdx % 26));
-        const coordName = colLetter + (rIdx + 1);
+      const row = cell.closest('tr');
+      const rIdx = row ? row.rowIndex : 0;
+      const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+      const colLetter = String.fromCharCode(65 + (cIdx % 26));
+      const coordName = colLetter + (rIdx + 1);
 
-        const currentFormula = getCellFormula(cell) || cell.getAttribute('data-formula') || '';
-        title.textContent = '🧮 Table Formula: Cell ' + coordName;
-        coordLabel.textContent = '📍 Target Cell: ' + coordName;
-        input.value = currentFormula || '=SUM(ABOVE)';
-      } else {
-        title.textContent = '🧮 Table Formulas & Calculations';
-        coordLabel.textContent = '💡 Tip: Click inside any table cell to edit its formula';
-        input.value = '=SUM(ABOVE)';
-      }
+      const currentFormula = getCellFormula(cell) || cell.getAttribute('data-formula') || '';
+      title.textContent = '🧮 Table Formula: Cell ' + coordName;
+      coordLabel.textContent = '📍 Target Cell: ' + coordName;
+      input.value = currentFormula || '=SUM(ABOVE)';
+
       modal.classList.add('show');
       setTimeout(() => { if (input) { input.focus(); input.select(); } }, 80);
     }
@@ -3434,18 +3570,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     function applyCurrentCellFormula() {
       const input = document.getElementById('formula-editor-input');
       const formula = (input ? input.value : '').trim();
-      const cell = getActiveTableCell();
-      if (!cell) {
-        showToastMsg('⚠️ Click inside a table cell first to apply a formula');
+      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      if (!cell || !document.contains(cell)) {
+        showToastMsg('⚠️ Target cell not found. Please click inside the cell first.');
         closeFormulaHelpModal();
         return;
       }
       if (!formula.startsWith('=')) {
-        showToastMsg('⚠️ Formula must start with = (e.g. =SUM(ABOVE))');
+        showToastMsg('⚠️ Formula must start with = (e.g. =SUM(ABOVE) or =A1+A2)');
         return;
       }
       cell.setAttribute('data-formula', formula);
-      cell.setAttribute('title', 'Formula: ' + formula);
+      cell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
       cell.classList.add('has-formula');
 
       // Update registry
@@ -3455,6 +3591,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
       const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
       const regKey = tableIdx + '_' + r + '_' + c;
+      window._tableFormulaRegistry = window._tableFormulaRegistry || {};
       window._tableFormulaRegistry[regKey] = formula;
 
       closeFormulaHelpModal();
@@ -3464,20 +3601,24 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function clearCurrentCellFormula() {
-      const cell = getActiveTableCell();
-      if (cell) {
+      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      if (cell && document.contains(cell)) {
         const table = cell.closest('table');
         const liveTables = getEditorLiveTables();
         const tableIdx = Math.max(0, liveTables.indexOf(table));
         const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
         const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
         const regKey = tableIdx + '_' + r + '_' + c;
-        delete window._tableFormulaRegistry[regKey];
+        if (window._tableFormulaRegistry) {
+          delete window._tableFormulaRegistry[regKey];
+        }
         cell.removeAttribute('data-formula');
         cell.removeAttribute('title');
         cell.classList.remove('has-formula');
         const badge = cell.querySelector('.formula-badge');
         if (badge) badge.remove();
+        const strong = cell.querySelector('strong');
+        if (strong) strong.removeAttribute('data-formula');
         showToastMsg('🗑 Formula removed');
         postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       }
@@ -3740,6 +3881,83 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       // 3. Post to Flutter
       postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       showToastMsg('🎨 Table formatting updated!');
+    }
+
+    /* ====== TABLE ROW & COLUMN EDITING UTILITIES ====== */
+    function insertTableRow(above) {
+      if (editorInstance) {
+        editorInstance.execute(above ? 'insertTableRowAbove' : 'insertTableRowBelow');
+        setTimeout(() => { scanAndRegisterTableFormulas(); autoUpdateTableFormulasDOM(); }, 60);
+      } else {
+        const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+        if (cell && cell.closest('table')) {
+          const table = cell.closest('table');
+          const row = cell.closest('tr');
+          const rIdx = row ? row.rowIndex : 0;
+          const newRow = table.insertRow(above ? rIdx : rIdx + 1);
+          const colCount = row ? row.cells.length : 1;
+          for (let i = 0; i < colCount; i++) {
+            const c = newRow.insertCell();
+            c.innerHTML = '<p><br></p>';
+            c.style.border = '1px solid #cbd5e1';
+            c.style.padding = '8px 12px';
+          }
+        }
+      }
+      showToastMsg('➕ ' + (above ? 'Row inserted above' : 'Row inserted below'));
+    }
+
+    function deleteTableRow() {
+      if (editorInstance) {
+        editorInstance.execute('deleteTableRow');
+        setTimeout(() => { scanAndRegisterTableFormulas(); autoUpdateTableFormulasDOM(); }, 60);
+      } else {
+        const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+        if (cell && cell.closest('tr')) {
+          cell.closest('tr').remove();
+        }
+      }
+      showToastMsg('🗑️ Row deleted');
+    }
+
+    function insertTableColumn(left) {
+      if (editorInstance) {
+        editorInstance.execute(left ? 'insertTableColumnLeft' : 'insertTableColumnRight');
+        setTimeout(() => { scanAndRegisterTableFormulas(); autoUpdateTableFormulasDOM(); }, 60);
+      } else {
+        const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+        if (cell && cell.closest('table')) {
+          const table = cell.closest('table');
+          const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+          const targetIdx = left ? cIdx : cIdx + 1;
+          for (let r = 0; r < table.rows.length; r++) {
+            const c = table.rows[r].insertCell(targetIdx);
+            c.innerHTML = '<p><br></p>';
+            c.style.border = '1px solid #cbd5e1';
+            c.style.padding = '8px 12px';
+          }
+        }
+      }
+      showToastMsg('➕ ' + (left ? 'Column inserted left' : 'Column inserted right'));
+    }
+
+    function deleteTableColumn() {
+      if (editorInstance) {
+        editorInstance.execute('deleteTableColumn');
+        setTimeout(() => { scanAndRegisterTableFormulas(); autoUpdateTableFormulasDOM(); }, 60);
+      } else {
+        const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+        if (cell && cell.closest('table')) {
+          const table = cell.closest('table');
+          const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+          for (let r = 0; r < table.rows.length; r++) {
+            if (table.rows[r].cells[cIdx]) {
+              table.rows[r].deleteCell(cIdx);
+            }
+          }
+        }
+      }
+      showToastMsg('🗑️ Column deleted');
     }
 
     /* ====== UNIVERSAL PASTE SANITIZER & NORMALIZER ====== */
@@ -4305,10 +4523,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
         balloons.forEach(panel => {
           if (!panel.offsetParent && panel.style.display === 'none') return;
+          // ONLY clamp dialog/form panels (Table Properties, Cell Properties, etc.)
+          // Never clamp contextual toolbars! CKEditor's positioning engine manages toolbars naturally.
+          const isFormPanel = panel.querySelector('.ck-form, .ck-table-properties-form, .ck-table-cell-properties-form');
+          if (!isFormPanel) return;
+
           const rect = panel.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) return;
 
-          // Adjust vertical position if overflowing bottom
+          // Adjust vertical position only if overflowing bottom so Save/Cancel buttons are visible
           if (rect.bottom > maxBottom) {
             const overflowY = rect.bottom - maxBottom;
             const currentTop = parseFloat(panel.style.top) || rect.top;
@@ -4316,8 +4539,6 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             if (Math.abs(currentTop - newTop) > 1) {
               panel.style.top = newTop + 'px';
             }
-          } else if (rect.top < minTop) {
-            panel.style.top = minTop + 'px';
           }
 
           // Adjust horizontal position if overflowing right or left
@@ -4334,7 +4555,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
-    // Observe when balloon panels are added, opened or moved
+    // Observe when balloon panels are added or opened (do NOT observe 'style' to avoid loops)
     const balloonObserver = new MutationObserver(() => {
       if (!_isClamping) {
         requestAnimationFrame(clampAllBalloons);
@@ -4344,7 +4565,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class', 'style']
+      attributeFilter: ['class']
     });
 
     window.addEventListener('resize', () => { requestAnimationFrame(clampAllBalloons); });
