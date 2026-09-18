@@ -1793,14 +1793,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     })();
 
     setTimeout(() => {
-      if (!scriptLoaded && !editorInstance && !isFallback) initFallback();
+      if (!editorInstance && !isFallback) initFallback();
     }, 8000);
 
     function initCKEditor() {
       if (typeof CKEDITOR === 'undefined') { initFallback(); return; }
 
-      CKEDITOR.ClassicEditor
-        .create(document.querySelector('#editor'), {
+      try {
+        CKEDITOR.ClassicEditor
+          .create(document.querySelector('#editor'), {
           toolbar: {
             items: [
               'undo', 'redo', '|',
@@ -1998,49 +1999,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               }
             }
           },
-          mediaEmbed: {
-            previewsInData: true,
-            providers: [
-              {
-                name: 'youtube',
-                url: [
-                  /(?:m\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/,
-                  /(?:m\.)?youtube\.com\/v\/([a-zA-Z0-9_-]+)/,
-                  /youtube\.com\/embed\/([a-zA-Z0-9_-]+)/,
-                  /youtu\.be\/([a-zA-Z0-9_-]+)/,
-                  /youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/
-                ],
-                html: match => {
-                  const id = match[1];
-                  return (
-                    '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">' +
-                      '<iframe src="https://www.youtube.com/embed/' + id + '" ' +
-                        'style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" ' +
-                        'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" ' +
-                        'allowfullscreen></iframe>' +
-                    '</div>'
-                  );
-                }
-              },
-              {
-                name: 'vimeo',
-                url: [
-                  /vimeo\.com\/(\d+)/,
-                  /player\.vimeo\.com\/video\/(\d+)/
-                ],
-                html: match => {
-                  const id = match[1];
-                  return (
-                    '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">' +
-                      '<iframe src="https://player.vimeo.com/video/' + id + '" ' +
-                        'style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" ' +
-                        'allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' +
-                    '</div>'
-                  );
-                }
-              }
-            ]
-          },
+          mediaEmbed: { previewsInData: true },
           codeBlock: {
             languages: [
               { language: 'plaintext', label: 'Plain text' },
@@ -2086,18 +2045,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           editorInstance = editor;
           window.editorInstance = editor;
 
-          /* Register dataFormula attribute on tableCell and extend text attributes */
+          /* Register dataFormula attribute on tableCell so CKEditor preserves it in model & view */
           try {
             editor.model.schema.extend('tableCell', { allowAttributes: ['dataFormula'] });
             editor.conversion.attributeToAttribute({
               model: 'dataFormula',
               view: 'data-formula'
             });
-            editor.model.schema.extend('\$text', {
-              allowAttributes: ['italic', 'bold', 'underline', 'strikethrough']
-            });
           } catch (e) {
-            console.warn('schema registration error:', e);
+            console.warn('dataFormula schema registration error:', e);
           }
 
           if (initialContent) {
@@ -2201,6 +2157,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           console.warn('CKEditor init failed, falling back:', err);
           initFallback();
         });
+      } catch (syncErr) {
+        console.warn('CKEditor synchronous init failed, falling back:', syncErr);
+        initFallback();
+      }
     }
 
     /* Base64 Upload Adapter for images */
