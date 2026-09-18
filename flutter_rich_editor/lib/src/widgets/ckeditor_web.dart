@@ -35,6 +35,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   late final String _editorId;
   web.HTMLIFrameElement? _iframe;
   JSFunction? _messageListener;
+  String? _lastReportedHtml;
 
   @override
   void initState() {
@@ -42,6 +43,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     final int uniqueId = DateTime.now().microsecondsSinceEpoch;
     _editorId = 'ckeditor_$uniqueId';
     _viewType = 'ckeditor-view-$uniqueId';
+    _lastReportedHtml = widget.initialHtml;
 
     _registerViewFactory();
     _setupMessageListener();
@@ -52,6 +54,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   @override
   void didUpdateWidget(covariant CKEditorWebView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialHtml != widget.initialHtml && widget.initialHtml != _lastReportedHtml) {
+      _lastReportedHtml = widget.initialHtml;
+      setHtml(widget.initialHtml);
+    }
     if (oldWidget.isDark != widget.isDark) {
       _sendThemeUpdate(widget.isDark);
     }
@@ -100,6 +106,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 _sendThemeUpdate(widget.isDark);
               } else if (type == 'ckeditor_change') {
                 final String html = decoded['html'] as String? ?? '';
+                _lastReportedHtml = html;
                 widget.onContentChanged(html);
               }
             }
@@ -112,6 +119,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   }
 
   void setHtml(String html) {
+    _lastReportedHtml = html;
     if (_iframe?.contentWindow == null) return;
     _iframe!.contentWindow!.postMessage(
       jsonEncode(<String, dynamic>{
@@ -161,7 +169,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   <!-- Google Fonts for rich typography (Calibri fallbacks, Inter, Roboto, Lato, Poppins, etc.) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&family=Lato:wght@400;700&family=Montserrat:wght@400;600;700&family=Open+Sans:wght@400;600;700&family=Poppins:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Roboto:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700&display=swap" rel="stylesheet">
   <style>
     /* ====== RESET & BASE ====== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -234,8 +242,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck.ck-toolbar .ck-toolbar__items { flex-wrap: wrap !important; overflow: visible !important; }
     .ck.ck-toolbar .ck-toolbar__separator { background: #e2e8f0 !important; }
     .ck.ck-editor__main { flex: 1 1 auto !important; overflow-y: auto !important; height: 0 !important; }
-    .ck-content { min-height: 100% !important; padding: 14px 20px !important; font-size: 15px !important; line-height: 1.7 !important; cursor: text !important; }
+    .ck-content { min-height: 100% !important; padding: 14px 20px !important; font-size: 15px !important; line-height: 1.7 !important; cursor: text !important; font-synthesis: weight style small-caps !important; -webkit-font-smoothing: antialiased; }
+    .ck-content * { font-synthesis: weight style small-caps !important; }
     .ck-content:focus { outline: none !important; }
+    .ck-content i, .ck-content em, .ck-content cite, .ck-content dfn,
+    .ck-content [style*="font-style: italic"], .ck-content [style*="font-style:italic"], .ck-content span[style*="italic"] {
+      font-style: italic !important;
+    }
     /* Heading Styles */
     .ck-content h1 { font-size: 2em; font-weight: 700; margin: 0.67em 0; color: #0f172a; }
     .ck-content h2 { font-size: 1.5em; font-weight: 600; margin: 0.83em 0; color: #1e293b; }
@@ -336,9 +349,47 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content .marker-blue { background: #bfdbfe; }
     .ck-content .pen-red { color: #dc2626; background: transparent; }
     .ck-content .pen-green { color: #16a34a; background: transparent; }
-    /* Todo list */
-    .ck-content .todo-list { list-style: none; padding-left: 0; }
-    .ck-content .todo-list li { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }
+    /* Todo list - aligned cleanly without left border overflow */
+    .ck-content .todo-list,
+    .ck-content ul.todo-list,
+    .ck-content ol.todo-list {
+      list-style: none !important;
+      padding-left: 32px !important;
+      margin: 8px 0 !important;
+    }
+    .ck-content .todo-list li {
+      position: relative !important;
+      margin: 4px 0 !important;
+      padding-left: 0 !important;
+      display: block !important;
+      line-height: 1.6 !important;
+    }
+    .ck-content .todo-list li .ck-todo-list__label,
+    .ck-content .todo-list li label {
+      position: absolute !important;
+      left: -26px !important;
+      top: 2px !important;
+      margin: 0 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      cursor: pointer !important;
+      user-select: none !important;
+      vertical-align: middle !important;
+    }
+    .ck-content .todo-list li .ck-todo-list__label input[type="checkbox"],
+    .ck-content .todo-list li label input[type="checkbox"],
+    .ck-content .todo-list input[type="checkbox"] {
+      cursor: pointer !important;
+      margin: 0 !important;
+      width: 16px !important;
+      height: 16px !important;
+      accent-color: #16a34a !important;
+      vertical-align: middle !important;
+    }
+    .ck-content .todo-list .todo-list {
+      padding-left: 28px !important;
+    }
     /* Page break */
     .ck-content .page-break { page-break-after: always; border-top: 2px dashed #94a3b8; margin: 32px 0; padding: 8px 0; text-align: center; color: #94a3b8; font-size: 11px; }
     /* Horizontal line */
@@ -966,54 +1017,153 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15) !important;
     }
 
-    /* Buttons inside balloon forms (Save, Cancel) */
+    /* Fix CKEditor Form & Media Dialog Button Icons */
+    .ck.ck-media-form .ck-button .ck-icon,
+    .ck.ck-form .ck-button .ck-icon,
+    .ck.ck-button-save .ck-icon,
+    .ck.ck-button-cancel .ck-icon,
+    .ck.ck-button .ck-icon,
+    .ck.ck-icon {
+      width: 16px !important;
+      height: 16px !important;
+      min-width: 16px !important;
+      min-height: 16px !important;
+      max-width: 16px !important;
+      max-height: 16px !important;
+      display: inline-block !important;
+      vertical-align: middle !important;
+    }
+
+    /* Media Embed Balloon Form Styling */
+    .ck.ck-media-form {
+      padding: 12px 14px !important;
+      min-width: 320px !important;
+      max-width: 480px !important;
+      box-sizing: border-box !important;
+    }
+    .ck.ck-media-form .ck-labeled-field-view {
+      margin-bottom: 6px !important;
+    }
+    .ck.ck-media-form .ck-labeled-field-view .ck-input {
+      min-height: 36px !important;
+      font-size: 13px !important;
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 6px !important;
+      padding: 6px 10px !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .ck.ck-media-form .ck-form__actions,
     .ck.ck-form__actions {
       display: flex !important;
       gap: 8px !important;
       justify-content: flex-end !important;
+      align-items: center !important;
       margin-top: 10px !important;
       padding-top: 8px !important;
       border-top: 1px solid #f1f5f9 !important;
     }
 
-    .ck.ck-button-save {
+    .ck.ck-button-save,
+    .ck.ck-media-form .ck-button-save {
       background: #2563eb !important;
       color: #ffffff !important;
+      border: 1px solid #2563eb !important;
       border-radius: 6px !important;
-      padding: 5px 14px !important;
+      padding: 6px 14px !important;
       font-weight: 600 !important;
       font-size: 12.5px !important;
-      min-height: 30px !important;
+      min-height: 32px !important;
+      min-width: 36px !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 6px !important;
       transition: all 0.15s ease !important;
+      cursor: pointer !important;
+      box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2) !important;
     }
-    .ck.ck-button-save:hover {
+    .ck.ck-button-save:hover,
+    .ck.ck-media-form .ck-button-save:hover {
       background: #1d4ed8 !important;
+      border-color: #1d4ed8 !important;
     }
-    .ck.ck-button-save .ck-icon {
+    .ck.ck-button-save .ck-icon,
+    .ck.ck-button-save svg {
       color: #ffffff !important;
+      fill: #ffffff !important;
+      stroke: #ffffff !important;
+    }
+    .ck.ck-media-form .ck-button-save::after {
+      content: "Insert";
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-left: 2px;
     }
 
-    .ck.ck-button-cancel {
+    .ck.ck-button-cancel,
+    .ck.ck-media-form .ck-button-cancel {
       border: 1px solid #cbd5e1 !important;
       border-radius: 6px !important;
-      padding: 5px 14px !important;
+      background: #ffffff !important;
+      padding: 6px 14px !important;
       font-size: 12.5px !important;
-      min-height: 30px !important;
+      font-weight: 500 !important;
+      min-height: 32px !important;
+      min-width: 36px !important;
       color: #475569 !important;
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 6px !important;
       transition: all 0.15s ease !important;
+      cursor: pointer !important;
     }
-    .ck.ck-button-cancel:hover {
+    .ck.ck-button-cancel:hover,
+    .ck.ck-media-form .ck-button-cancel:hover {
       background: #f1f5f9 !important;
       border-color: #94a3b8 !important;
+    }
+    .ck.ck-button-cancel .ck-icon,
+    .ck.ck-button-cancel svg {
+      color: #475569 !important;
+      fill: #475569 !important;
+    }
+    .ck.ck-media-form .ck-button-cancel::after {
+      content: "Cancel";
+      font-size: 12px;
+      font-weight: 500;
+      color: #475569;
+      margin-left: 2px;
     }
 
     /* Dark mode for balloon forms and toolbars */
     body.dark .ck.ck-balloon-panel:has(.ck-form),
+    body.dark .ck.ck-balloon-panel:has(.ck-media-form),
     body.dark .ck.ck-balloon-panel:has(.ck-table-properties-form),
     body.dark .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) {
       background: #1e1e2e !important;
       border-color: #45475a !important;
       box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4) !important;
+    }
+    body.dark .ck.ck-media-form .ck-labeled-field-view .ck-input {
+      background: #181825 !important;
+      color: #cdd6f4 !important;
+      border-color: #45475a !important;
+    }
+    body.dark .ck.ck-media-form .ck-button-cancel {
+      background: #313244 !important;
+      color: #cdd6f4 !important;
+      border-color: #45475a !important;
+    }
+    body.dark .ck.ck-media-form .ck-button-cancel::after {
+      color: #cdd6f4 !important;
+    }
+    body.dark .ck.ck-media-form .ck-button-cancel .ck-icon,
+    body.dark .ck.ck-media-form .ck-button-cancel svg {
+      color: #cdd6f4 !important;
+      fill: #cdd6f4 !important;
     }
     body.dark .ck.ck-balloon-panel .ck-toolbar {
       background: #1e1e2e !important;
@@ -1848,7 +1998,48 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               }
             }
           },
-          mediaEmbed: { previewsInData: true },
+          mediaEmbed: {
+            previewsInData: true,
+            providers: [
+              {
+                name: 'youtube',
+                url: [
+                  /^(?:m\.)?youtube\.com\/watch\?v=([\w-]+)(?:&.*)?$/,
+                  /^(?:m\.)?youtube\.com\/v\/([\w-]+)(?:\?.*)?$/,
+                  /^youtube\.com\/embed\/([\w-]+)(?:\?.*)?$/,
+                  /^youtu\.be\/([\w-]+)(?:\?.*)?$/
+                ],
+                html: match => {
+                  const id = match[1];
+                  return (
+                    '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">' +
+                      '<iframe src="https://www.youtube.com/embed/' + id + '" ' +
+                        'style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" ' +
+                        'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" ' +
+                        'allowfullscreen></iframe>' +
+                    '</div>'
+                  );
+                }
+              },
+              {
+                name: 'vimeo',
+                url: [
+                  /^vimeo\.com\/(\d+)/,
+                  /^player\.vimeo\.com\/video\/(\d+)/
+                ],
+                html: match => {
+                  const id = match[1];
+                  return (
+                    '<div style="position:relative;padding-bottom:56.25%;height:0;overflow:hidden;border-radius:8px;">' +
+                      '<iframe src="https://player.vimeo.com/video/' + id + '" ' +
+                        'style="position:absolute;top:0;left:0;width:100%;height:100%;border:none;" ' +
+                        'allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>' +
+                    '</div>'
+                  );
+                }
+              }
+            ]
+          },
           codeBlock: {
             languages: [
               { language: 'plaintext', label: 'Plain text' },
@@ -1894,15 +2085,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           editorInstance = editor;
           window.editorInstance = editor;
 
-          /* Register dataFormula attribute on tableCell so CKEditor preserves it in model & view */
+          /* Register dataFormula attribute on tableCell and extend text attributes */
           try {
             editor.model.schema.extend('tableCell', { allowAttributes: ['dataFormula'] });
             editor.conversion.attributeToAttribute({
               model: 'dataFormula',
               view: 'data-formula'
             });
+            editor.model.schema.extend('$text', {
+              allowAttributes: ['italic', 'bold', 'underline', 'strikethrough']
+            });
           } catch (e) {
-            console.warn('dataFormula schema registration error:', e);
+            console.warn('schema registration error:', e);
           }
 
           if (initialContent) {
@@ -1954,12 +2148,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                   scheduleLiveFormulaRecalc();
                 }
               });
-              // MutationObserver: attaches media listeners on DOM structure changes without triggering formula loops
-              const formulaObserver = new MutationObserver(() => {
-                attachMediaListeners();
-                attachMediaDragHandles();
-              });
-              formulaObserver.observe(el, { childList: true, subtree: true });
+              // Attach media listeners safely without mutating CKEditor's widget DOM
+              attachMediaListeners();
 
               /* Universal Paste Sanitizer & Style Normalizer */
               editor.editing.view.document.on('clipboardInput', (evt, data) => {
@@ -2729,6 +2919,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const cleanHtml = sanitizeTableHtml(html);
       extractAndSeedFormulasFromHtml(cleanHtml);
       if (editorInstance) {
+        if (editorInstance.getData() === cleanHtml) {
+          return;
+        }
         editorInstance.setData(cleanHtml);
         setTimeout(() => {
           scanAndRegisterTableFormulas();
@@ -4578,9 +4771,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       return tb;
     }
 
+    let _mediaListenersAttached = false;
     function attachMediaListeners() {
       const editable = document.querySelector('.ck-content, #fallback-content');
-      if (!editable) return;
+      if (!editable || _mediaListenersAttached) return;
+      _mediaListenersAttached = true;
 
       editable.addEventListener('click', function(e) {
         const mediaFig = e.target.closest('figure.media, .media, [data-oembed-url], video, iframe');
@@ -4671,47 +4866,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function attachMediaDragHandles() {
-      const editable = document.querySelector('.ck-content, #fallback-content');
-      if (!editable) return;
-
-      editable.querySelectorAll('figure.media, .media').forEach(media => {
-        if (!media.querySelector('.video-resize-handle')) {
-          const handle = document.createElement('div');
-          handle.className = 'video-resize-handle';
-          handle.title = 'Drag to resize video';
-          media.appendChild(handle);
-
-          let startX, startW, parentW;
-          handle.addEventListener('mousedown', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            startX = e.clientX;
-            startW = media.offsetWidth;
-            parentW = media.parentElement ? media.parentElement.offsetWidth : 800;
-
-            function onMouseMove(ev) {
-              const dx = ev.clientX - startX;
-              const newW = Math.max(160, Math.min(parentW, startW + dx));
-              const pct = Math.round((newW / parentW) * 100);
-              media.style.width = pct + '%';
-              media.style.maxWidth = pct + '%';
-              showVideoToolbar(media);
-            }
-            function onMouseUp() {
-              document.removeEventListener('mousemove', onMouseMove);
-              document.removeEventListener('mouseup', onMouseUp);
-              if (editorInstance) {
-                try {
-                  const html = getEditorData();
-                  postToFlutter({ type: 'ckeditor_change', html: html });
-                } catch(e) {}
-              }
-            }
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-          });
-        }
-      });
+      // Safe no-op: Video sizing is handled by videoResizeToolbar without mutating CKEditor widget DOM
     }
 
     function showToastMsg(msg) {
