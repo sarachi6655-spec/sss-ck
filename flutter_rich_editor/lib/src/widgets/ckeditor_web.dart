@@ -2004,10 +2004,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               {
                 name: 'youtube',
                 url: [
-                  /^(?:m\.)?youtube\.com\/watch\?v=([\w-]+)(?:&.*)?$/,
-                  /^(?:m\.)?youtube\.com\/v\/([\w-]+)(?:\?.*)?$/,
-                  /^youtube\.com\/embed\/([\w-]+)(?:\?.*)?$/,
-                  /^youtu\.be\/([\w-]+)(?:\?.*)?$/
+                  /^(?:m\.)?youtube\.com\/watch\?v=([\w-]+)(?:&.*)?\$/,
+                  /^(?:m\.)?youtube\.com\/v\/([\w-]+)(?:\?.*)?\$/,
+                  /^youtube\.com\/embed\/([\w-]+)(?:\?.*)?\$/,
+                  /^youtu\.be\/([\w-]+)(?:\?.*)?\$/
                 ],
                 html: match => {
                   const id = match[1];
@@ -2092,7 +2092,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               model: 'dataFormula',
               view: 'data-formula'
             });
-            editor.model.schema.extend('$text', {
+            editor.model.schema.extend('\$text', {
               allowAttributes: ['italic', 'bold', 'underline', 'strikethrough']
             });
           } catch (e) {
