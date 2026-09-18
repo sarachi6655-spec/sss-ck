@@ -2608,12 +2608,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 formula = extractFormulaFromTitle(cell.getAttribute('title'));
               }
               if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-                if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
-                  const liveC = liveT.rows[r].cells[c];
-                  if (liveC.classList.contains('has-formula') || liveC.hasAttribute('data-formula')) {
-                    formula = window._tableFormulaRegistry[regKey];
-                  }
-                }
+                formula = window._tableFormulaRegistry[regKey];
               }
 
               // Strip accidental 'fx' suffix from cell text
@@ -2786,6 +2781,27 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
       }
       return clean;
+    }
+
+    function normalizeFormulaString(raw) {
+      if (!raw) return '';
+      let s = cleanFormulaText(raw);
+      if (s.startsWith('=')) {
+        s = s.substring(1).trim();
+      }
+      // If user typed e.g. (SUM(A3+B3+C3+D3) with extra leading paren
+      let openCount = (s.match(/\(/g) || []).length;
+      let closeCount = (s.match(/\)/g) || []).length;
+      if (s.startsWith('(') && openCount > closeCount) {
+        s = s.substring(1).trim();
+        openCount--;
+      }
+      // Auto-close any unclosed parens at the end
+      while (openCount > closeCount) {
+        s += ')';
+        closeCount++;
+      }
+      return s ? ('=' + s) : '';
     }
 
     function extractNumber(raw) {
@@ -3280,8 +3296,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     function scanAndRegisterTableFormulas() {
       const liveTables = getEditorLiveTables();
-      // Reset formula registry so dead keys from old tables/rows never leak
-      window._tableFormulaRegistry = {};
+      window._tableFormulaRegistry = window._tableFormulaRegistry || {};
+      const validKeys = new Set();
 
       liveTables.forEach((table, tableIdx) => {
         const rows = table.rows;
@@ -3290,17 +3306,17 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           for (let c = 0; c < rows[r].cells.length; c++) {
             const cell = rows[r].cells[c];
             const regKey = tableIdx + '_' + r + '_' + c;
+            validKeys.add(regKey);
+
             let rawText = '';
             for (let n of cell.childNodes) {
               if (n.classList && n.classList.contains('formula-badge')) continue;
               rawText += (n.innerText || n.textContent || '');
             }
-            rawText = rawText.replace(/\\bfx\\b/gi, '').trim();
+            rawText = rawText.replace(/\bfx\b/gi, '').trim();
             const cleanTxt = cleanFormulaText(rawText);
 
-            const hasBadge = !!cell.querySelector('.formula-badge');
-
-            // Find formula from attributes or children
+            // Find formula from attributes, children, or existing registry
             let attrFormula = cell.getAttribute ? cell.getAttribute('data-formula') : null;
             if (!attrFormula && cell.getAttribute && cell.getAttribute('title')) {
               attrFormula = extractFormulaFromTitle(cell.getAttribute('title'));
@@ -3314,11 +3330,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 if (withTitle) attrFormula = extractFormulaFromTitle(withTitle.getAttribute('title'));
               }
             }
+            if (!attrFormula && window._tableFormulaRegistry[regKey]) {
+              attrFormula = window._tableFormulaRegistry[regKey];
+            }
 
             const lastVal = cell.getAttribute ? cell.getAttribute('data-formula-val') : null;
+            const isFocused = cell.contains(document.activeElement);
 
-            // 1) If cell has a formula attribute, but the cell was completely cleared/erased:
-            if (attrFormula && (rawText === '' || cleanTxt === '')) {
+            // Only remove formula if user explicitly edited text to a different static value after blur:
+            if (attrFormula && !isFocused && lastVal !== null && cleanTxt !== '' && cleanTxt !== lastVal && !cleanTxt.startsWith('=')) {
               if (cell.removeAttribute) {
                 cell.removeAttribute('data-formula');
                 cell.removeAttribute('title');
@@ -3327,38 +3347,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               }
               const b = cell.querySelector('.formula-badge');
               if (b) b.remove();
-              if (editorInstance && editorInstance.model) {
-                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
-              }
-              continue;
-            }
-
-            // 2) If cell has a formula attribute, but user manually edited the cell text to a different static value:
-            if (attrFormula && lastVal !== null && cleanTxt !== lastVal && !cleanTxt.startsWith('=')) {
-              if (cell.removeAttribute) {
-                cell.removeAttribute('data-formula');
-                cell.removeAttribute('title');
-                cell.removeAttribute('data-formula-val');
-                cell.classList.remove('has-formula');
-              }
-              const b = cell.querySelector('.formula-badge');
-              if (b) b.remove();
-              if (editorInstance && editorInstance.model) {
-                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
-              }
-              continue;
-            }
-
-            // 3) Guard against CKEditor attribute cloning on row/col insert:
-            if (attrFormula && !hasBadge && rawText === '' && !cleanTxt.startsWith('=')) {
-              if (cell.removeAttribute) {
-                cell.removeAttribute('data-formula');
-                cell.removeAttribute('title');
-                cell.removeAttribute('data-formula-val');
-                cell.classList.remove('has-formula');
-              }
-              const b = cell.querySelector('.formula-badge');
-              if (b) b.remove();
+              delete window._tableFormulaRegistry[regKey];
               if (editorInstance && editorInstance.model) {
                 _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
               }
@@ -3367,10 +3356,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
             let formula = null;
             if (cleanTxt.startsWith('=')) {
-              // User explicitly typed or kept a formula starting with =
-              formula = cleanTxt;
+              formula = normalizeFormulaString(cleanTxt);
             } else if (attrFormula) {
-              formula = cleanFormulaText(attrFormula);
+              formula = normalizeFormulaString(attrFormula);
             }
 
             if (formula && formula.startsWith('=')) {
@@ -3382,6 +3370,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           }
         }
       });
+
+      // Prune keys for cells or tables that have been removed
+      for (let k in window._tableFormulaRegistry) {
+        if (!validKeys.has(k)) {
+          delete window._tableFormulaRegistry[k];
+        }
+      }
     }
 
     function getCellFormula(cell, tableIdx, r, c) {
@@ -3399,46 +3394,51 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (cell) {
         const directText = cleanFormulaText(cell.innerText || cell.textContent || '');
         if (directText.startsWith('=')) {
-          if (regKey) window._tableFormulaRegistry[regKey] = directText;
-          return directText;
+          const nf = normalizeFormulaString(directText);
+          if (regKey) window._tableFormulaRegistry[regKey] = nf;
+          return nf;
         }
         if (cell.getAttribute && cell.getAttribute('data-formula')) {
-          const f = cleanFormulaText(cell.getAttribute('data-formula'));
-          if (f.startsWith('=')) {
-            if (regKey) window._tableFormulaRegistry[regKey] = f;
-            return f;
-          }
+          const nf = normalizeFormulaString(cell.getAttribute('data-formula'));
+          if (regKey) window._tableFormulaRegistry[regKey] = nf;
+          return nf;
         }
         if (cell.getAttribute && cell.getAttribute('title')) {
           const f = extractFormulaFromTitle(cell.getAttribute('title'));
-          if (f && f.startsWith('=')) {
-            if (regKey) window._tableFormulaRegistry[regKey] = f;
-            return f;
+          if (f) {
+            const nf = normalizeFormulaString(f);
+            if (regKey) window._tableFormulaRegistry[regKey] = nf;
+            return nf;
           }
         }
         if (cell.querySelector) {
           const withFormula = cell.querySelectorAll('[data-formula]');
           for (let i = 0; i < withFormula.length; i++) {
-            const f = cleanFormulaText(withFormula[i].getAttribute('data-formula'));
-            if (f.startsWith('=')) {
-              if (regKey) window._tableFormulaRegistry[regKey] = f;
-              return f;
+            const nf = normalizeFormulaString(withFormula[i].getAttribute('data-formula'));
+            if (nf) {
+              if (regKey) window._tableFormulaRegistry[regKey] = nf;
+              return nf;
             }
           }
           const withTitle = cell.querySelectorAll('[title*="Formula:"]');
           for (let i = 0; i < withTitle.length; i++) {
             const f = extractFormulaFromTitle(withTitle[i].getAttribute('title'));
-            if (f && f.startsWith('=')) {
-              if (regKey) window._tableFormulaRegistry[regKey] = f;
-              return f;
+            if (f) {
+              const nf = normalizeFormulaString(f);
+              if (regKey) window._tableFormulaRegistry[regKey] = nf;
+              return nf;
             }
           }
         }
       }
       if (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-        if (cell && (cell.classList.contains('has-formula') || (cell.getAttribute && cell.getAttribute('data-formula')))) {
-          return window._tableFormulaRegistry[regKey];
+        const f = window._tableFormulaRegistry[regKey];
+        if (cell) {
+          if (!cell.hasAttribute('data-formula')) cell.setAttribute('data-formula', f);
+          if (!cell.classList.contains('has-formula')) cell.classList.add('has-formula');
+          if (!cell.hasAttribute('title')) cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
         }
+        return f;
       }
       return null;
     }
@@ -3665,7 +3665,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     grid[r][c] = resStr;
 
                     // Keep CKEditor model in sync (non-undoable batch)
-                    if (editorInstance) {
+                    // Only sync model if user is NOT actively typing in any table cell (to prevent stealing focus/caret)
+                    const isAnyCellActive = document.activeElement && document.activeElement.closest && document.activeElement.closest('table');
+                    if (editorInstance && (!isAnyCellActive || forceCell)) {
                       _syncModelFormulaCell(editorInstance, tableIdx, r, c, resStr, formula);
                     }
                   }
@@ -3723,9 +3725,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             for (let c = 0; c < table.rows[r].cells.length; c++) {
               const regKey = tableIdx + '_' + r + '_' + c;
               if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-                const strong = table.rows[r].cells[c].querySelector('strong');
-                if (strong) {
-                  _syncModelFormulaCell(editorInstance, tableIdx, r, c, strong.textContent, window._tableFormulaRegistry[regKey]);
+                const cell = table.rows[r].cells[c];
+                const strong = cell.querySelector('strong');
+                const formula = window._tableFormulaRegistry[regKey];
+                const text = strong ? strong.textContent : cleanFormulaText(cell.innerText || '');
+                if (text) {
+                  _syncModelFormulaCell(editorInstance, tableIdx, r, c, text, formula);
                 }
               }
             }
@@ -3772,8 +3777,39 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
+    // Double-click on formula cell to open formula editor modal
+    document.addEventListener('dblclick', function(e) {
+      const cell = e.target.closest('td, th');
+      if (cell) {
+        lastActiveTableCell = cell;
+        const formula = getCellFormula(cell);
+        if (formula && formula.startsWith('=')) {
+          e.preventDefault();
+          e.stopPropagation();
+          window._targetFormulaCell = cell;
+          openCellFormulaEditor(cell);
+        }
+      }
+    }, true);
+
+    function resolveTargetCell() {
+      let cell = window._targetFormulaCell;
+      if (cell && document.contains(cell)) return cell;
+      if (window._targetFormulaCoord) {
+        const liveTables = getEditorLiveTables();
+        const { tableIdx, r, c } = window._targetFormulaCoord;
+        if (liveTables[tableIdx] && liveTables[tableIdx].rows && liveTables[tableIdx].rows[r] && liveTables[tableIdx].rows[r].cells && liveTables[tableIdx].rows[r].cells[c]) {
+          const liveCell = liveTables[tableIdx].rows[r].cells[c];
+          window._targetFormulaCell = liveCell;
+          lastActiveTableCell = liveCell;
+          return liveCell;
+        }
+      }
+      return lastActiveTableCell || getActiveTableCell();
+    }
+
     function showFormulaHelpModal() {
-      let cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      let cell = resolveTargetCell();
       if (!cell || !document.contains(cell)) {
         const anyCell = document.querySelector('.ck-content table td, .ck-content table th, #fallback-content table td, #fallback-content table th, table td, table th');
         if (anyCell) {
@@ -3790,7 +3826,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     function openCellFormulaEditor(cell) {
       if (!cell) {
-        cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+        cell = resolveTargetCell();
       }
       if (!cell || !document.contains(cell)) {
         showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
@@ -3804,13 +3840,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const coordLabel = document.getElementById('formula-cell-coord');
       const title = document.getElementById('formula-modal-title');
 
+      const table = cell.closest('table');
+      const liveTables = getEditorLiveTables();
+      const tableIdx = Math.max(0, liveTables.indexOf(table));
       const row = cell.closest('tr');
       const rIdx = row ? row.rowIndex : 0;
       const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+      window._targetFormulaCoord = { tableIdx, r: rIdx, c: cIdx };
+
       const colLetter = String.fromCharCode(65 + (cIdx % 26));
       const coordName = colLetter + (rIdx + 1);
 
-      const currentFormula = getCellFormula(cell) || cell.getAttribute('data-formula') || '';
+      const currentFormula = getCellFormula(cell, tableIdx, rIdx, cIdx) || cell.getAttribute('data-formula') || '';
       title.textContent = '🧮 Table Formula: Cell ' + coordName;
       coordLabel.textContent = '📍 Target Cell: ' + coordName;
       input.value = currentFormula || '=SUM(ABOVE)';
@@ -3829,15 +3870,16 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     function applyCurrentCellFormula() {
       const input = document.getElementById('formula-editor-input');
-      const formula = (input ? input.value : '').trim();
-      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      const rawVal = (input ? input.value : '').trim();
+      if (!rawVal) {
+        showToastMsg('⚠️ Please enter a formula (e.g. =SUM(ABOVE) or =A1+B1)');
+        return;
+      }
+      const formula = normalizeFormulaString(rawVal);
+      const cell = resolveTargetCell();
       if (!cell || !document.contains(cell)) {
         showToastMsg('⚠️ Target cell not found. Please click inside the cell first.');
         closeFormulaHelpModal();
-        return;
-      }
-      if (!formula.startsWith('=')) {
-        showToastMsg('⚠️ Formula must start with = (e.g. =SUM(ABOVE) or =A1+A2)');
         return;
       }
       cell.setAttribute('data-formula', formula);
@@ -3864,7 +3906,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function clearCurrentCellFormula() {
-      const cell = window._targetFormulaCell || lastActiveTableCell || getActiveTableCell();
+      const cell = resolveTargetCell();
       if (cell && document.contains(cell)) {
         const table = cell.closest('table');
         const liveTables = getEditorLiveTables();
