@@ -2790,8 +2790,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         s = s.substring(1).trim();
       }
       // If user typed e.g. (SUM(A3+B3+C3+D3) with extra leading paren
-      let openCount = (s.match(/\(/g) || []).length;
-      let closeCount = (s.match(/\)/g) || []).length;
+      let openCount = s.split('(').length - 1;
+      let closeCount = s.split(')').length - 1;
       if (s.startsWith('(') && openCount > closeCount) {
         s = s.substring(1).trim();
         openCount--;
@@ -3313,7 +3313,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (n.classList && n.classList.contains('formula-badge')) continue;
               rawText += (n.innerText || n.textContent || '');
             }
-            rawText = rawText.replace(/\bfx\b/gi, '').trim();
+            rawText = rawText.replace(/\\bfx\\b/gi, '').trim();
             const cleanTxt = cleanFormulaText(rawText);
 
             // Find formula from attributes, children, or existing registry
