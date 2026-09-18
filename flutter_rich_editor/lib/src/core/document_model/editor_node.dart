@@ -210,6 +210,7 @@ class EditorNode {
     double? height,
     String uploadState = 'ready', // 'ready', 'uploading', 'error'
     double progress = 1.0,
+    Map<String, dynamic>? metadata,
   }) {
     return EditorNode(
       id: id,
@@ -221,6 +222,7 @@ class EditorNode {
         if (height != null) 'height': height,
         'uploadState': uploadState,
         'progress': progress,
+        if (metadata != null) ...metadata,
       },
     );
   }

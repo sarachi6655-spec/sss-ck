@@ -556,7 +556,6 @@ class HtmlDocumentCodec {
     if (a != null && a.attributes.containsKey('href')) {
       attrs['link'] = a.attributes['href'];
     }
-    final String style = element.attributes['style'] ?? '';
     if (style.isNotEmpty) {
       if (style.contains('text-align:')) {
         final RegExp alignRegex = RegExp(r'text-align:\s*([a-zA-Z]+)');
