@@ -402,7 +402,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content figure.media,
     .ck-content .media {
       position: relative !important;
-      margin: 16px auto !important;
+      margin: 16px auto;
       max-width: 100%;
       box-sizing: border-box;
       transition: width 0.2s ease, max-width 0.2s ease;
@@ -1771,6 +1771,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     let comments = [];
     let trackedChanges = [];
     let currentPanel = null;
+    window._mediaStyleRegistry = {};
 
     function postToFlutter(msg) {
       msg.editorId = EDITOR_ID;
@@ -2059,18 +2060,22 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           if (initialContent) {
             const cleanInitial = sanitizeTableHtml(initialContent);
             extractAndSeedFormulasFromHtml(cleanInitial);
+            extractAndSeedMediaStylesFromHtml(cleanInitial);
             editor.setData(cleanInitial);
             setTimeout(() => {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
+              reapplyAllMediaStyles();
             }, 100);
             setTimeout(() => {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
+              reapplyAllMediaStyles();
             }, 350);
             setTimeout(() => {
               scanAndRegisterTableFormulas();
               evaluateAllTableFormulas(false);
+              reapplyAllMediaStyles();
             }, 700);
           }
 
@@ -2079,8 +2084,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             return new Base64UploadAdapter(loader);
           };
 
-          /* Content change listener - always use getEditorData() to preserve table formulas */
+          /* Re-apply media styles on CKEditor view render */
+          try {
+            if (editor.editing && editor.editing.view && editor.editing.view.document) {
+              editor.editing.view.document.on('render', () => {
+                reapplyAllMediaStyles();
+              });
+            }
+          } catch(e) {}
+
+          /* Content change listener - always use getEditorData() to preserve table formulas & media sizes */
           editor.model.document.on('change:data', (evt, batch) => {
+            reapplyAllMediaStyles();
             const data = getEditorData();
             postToFlutter({ type: 'ckeditor_change', html: data });
             updateParaCount();
@@ -2827,6 +2842,81 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       return cleanAndExportFormulasInHtml(html);
     }
 
+    function cleanAndExportMediaStylesInHtml(html) {
+      if (!html || html.indexOf('<figure') === -1) return html;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const figures = doc.querySelectorAll('figure.media, figure');
+        let modified = false;
+        figures.forEach(fig => {
+          const url = getMediaUrlFromFigure(fig);
+          if (url && window._mediaStyleRegistry && window._mediaStyleRegistry[url]) {
+            const reg = window._mediaStyleRegistry[url];
+            const rawStyle = fig.getAttribute('style') || '';
+            const filtered = rawStyle.split(';').map(s => s.trim()).filter(s => {
+              const lower = s.toLowerCase();
+              return lower &&
+                !lower.startsWith('width:') &&
+                !lower.startsWith('max-width:') &&
+                !lower.startsWith('margin:') &&
+                !lower.startsWith('margin-left:') &&
+                !lower.startsWith('margin-right:');
+            });
+            filtered.push('width:' + reg.width);
+            filtered.push('max-width:' + (reg.maxWidth || reg.width));
+            filtered.push('margin:' + (reg.margin || '16px auto'));
+            fig.setAttribute('style', filtered.join('; ') + ';');
+            fig.setAttribute('data-media-width', reg.width);
+            modified = true;
+          }
+        });
+        if (modified) {
+          return doc.body.innerHTML;
+        }
+      } catch(e) {
+        console.warn('cleanAndExportMediaStylesInHtml error:', e);
+      }
+      return html;
+    }
+
+    function extractAndSeedMediaStylesFromHtml(html) {
+      if (!html || html.indexOf('<figure') === -1) return;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const figures = doc.querySelectorAll('figure.media, figure');
+        figures.forEach(fig => {
+          const url = getMediaUrlFromFigure(fig);
+          const rawStyle = fig.getAttribute('style') || '';
+          if (url && rawStyle) {
+            let width = '';
+            let margin = '';
+            rawStyle.split(';').forEach(part => {
+              const kv = part.split(':');
+              if (kv.length >= 2) {
+                const k = kv[0].trim().toLowerCase();
+                const v = kv.slice(1).join(':').trim();
+                if (k === 'width') width = v;
+                if (k === 'margin') margin = v;
+              }
+            });
+            if (width) {
+              window._mediaStyleRegistry = window._mediaStyleRegistry || {};
+              window._mediaStyleRegistry[url] = {
+                width: width,
+                maxWidth: width,
+                margin: margin || '16px auto',
+                style: rawStyle
+              };
+            }
+          }
+        });
+      } catch(e) {
+        console.warn('extractAndSeedMediaStylesFromHtml error:', e);
+      }
+    }
+
     function getEditorData() {
       let data = '';
       if (editorInstance) {
@@ -2834,7 +2924,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       } else if (isFallback) {
         data = document.getElementById('fallback-content').innerHTML;
       }
-      return cleanAndExportFormulasInHtml(data);
+      data = cleanAndExportFormulasInHtml(data);
+      return cleanAndExportMediaStylesInHtml(data);
     }
 
     function extractAndSeedFormulasFromHtml(html) {
@@ -2879,28 +2970,34 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     function setEditorData(html) {
       const cleanHtml = sanitizeTableHtml(html);
       extractAndSeedFormulasFromHtml(cleanHtml);
+      extractAndSeedMediaStylesFromHtml(cleanHtml);
       if (editorInstance) {
         if (editorInstance.getData() === cleanHtml) {
+          reapplyAllMediaStyles();
           return;
         }
         editorInstance.setData(cleanHtml);
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
+          reapplyAllMediaStyles();
         }, 80);
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
+          reapplyAllMediaStyles();
         }, 300);
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
+          reapplyAllMediaStyles();
         }, 600);
       } else if (isFallback) {
         document.getElementById('fallback-content').innerHTML = cleanHtml;
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
+          reapplyAllMediaStyles();
         }, 80);
         postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       }
@@ -4732,6 +4829,65 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       return tb;
     }
 
+    function getMediaUrlFromFigure(fig) {
+      if (!fig) return null;
+      try {
+        const oembedDiv = fig.querySelector('[data-oembed-url]');
+        if (oembedDiv && oembedDiv.getAttribute('data-oembed-url')) {
+          return oembedDiv.getAttribute('data-oembed-url').trim();
+        }
+        const oembed = fig.querySelector('oembed');
+        if (oembed && oembed.getAttribute('url')) {
+          return oembed.getAttribute('url').trim();
+        }
+        const iframe = fig.querySelector('iframe');
+        if (iframe && iframe.getAttribute('src')) {
+          return iframe.getAttribute('src').trim();
+        }
+        const video = fig.querySelector('video');
+        if (video && video.getAttribute('src')) {
+          return video.getAttribute('src').trim();
+        }
+        if (fig.getAttribute('data-media-url')) {
+          return fig.getAttribute('data-media-url').trim();
+        }
+      } catch(e) {}
+      return fig.id || null;
+    }
+
+    function reapplyAllMediaStyles() {
+      try {
+        const figures = document.querySelectorAll('.ck-content figure.media, #fallback-content figure.media, .ck-content figure, #fallback-content figure');
+        figures.forEach(fig => {
+          const url = getMediaUrlFromFigure(fig);
+          if (url && window._mediaStyleRegistry && window._mediaStyleRegistry[url]) {
+            const reg = window._mediaStyleRegistry[url];
+            if (reg.width && fig.style.width !== reg.width) {
+              fig.style.width = reg.width;
+              fig.style.maxWidth = reg.maxWidth || reg.width;
+            }
+            if (reg.margin && fig.style.margin !== reg.margin) {
+              fig.style.margin = reg.margin;
+            }
+            if (fig.getAttribute('data-media-width') !== reg.width) {
+              fig.setAttribute('data-media-width', reg.width);
+            }
+          } else if (fig.style && fig.style.width) {
+            const u = getMediaUrlFromFigure(fig);
+            if (u) {
+              window._mediaStyleRegistry = window._mediaStyleRegistry || {};
+              window._mediaStyleRegistry[u] = {
+                width: fig.style.width,
+                maxWidth: fig.style.maxWidth || fig.style.width,
+                margin: fig.style.margin || '16px auto',
+                style: fig.getAttribute('style') || ''
+              };
+            }
+          }
+        });
+      } catch(e) {}
+    }
+
     let _mediaListenersAttached = false;
     function attachMediaListeners() {
       const editable = document.querySelector('.ck-content, #fallback-content');
@@ -4746,7 +4902,34 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         } else if (!e.target.closest('.video-resize-toolbar')) {
           hideVideoToolbar();
         }
+        reapplyAllMediaStyles();
       });
+
+      // Observe style attribute changes on editable figure elements
+      try {
+        const observer = new MutationObserver((mutations) => {
+          for (let i = 0; i < mutations.length; i++) {
+            const m = mutations[i];
+            if (m.type === 'attributes' && m.attributeName === 'style' && m.target) {
+              const fig = m.target.closest ? m.target.closest('figure.media, .media') : null;
+              if (fig) {
+                const url = getMediaUrlFromFigure(fig);
+                if (url && window._mediaStyleRegistry && window._mediaStyleRegistry[url]) {
+                  const reg = window._mediaStyleRegistry[url];
+                  if (fig.style.width !== reg.width) {
+                    fig.style.width = reg.width;
+                    fig.style.maxWidth = reg.maxWidth || reg.width;
+                  }
+                  if (reg.margin && fig.style.margin !== reg.margin) {
+                    fig.style.margin = reg.margin;
+                  }
+                }
+              }
+            }
+          }
+        });
+        observer.observe(editable, { attributes: true, subtree: true, attributeFilter: ['style', 'class'] });
+      } catch(e) {}
     }
 
     function showVideoToolbar(figure) {
@@ -4782,6 +4965,19 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (!activeMediaFigure.style.margin) {
         activeMediaFigure.style.margin = '16px auto';
       }
+      activeMediaFigure.setAttribute('data-media-width', size);
+
+      const url = getMediaUrlFromFigure(activeMediaFigure);
+      if (url) {
+        window._mediaStyleRegistry = window._mediaStyleRegistry || {};
+        window._mediaStyleRegistry[url] = {
+          width: size,
+          maxWidth: size,
+          margin: activeMediaFigure.style.margin,
+          style: 'width:' + size + ';max-width:' + size + ';margin:' + activeMediaFigure.style.margin + ';'
+        };
+      }
+
       showVideoToolbar(activeMediaFigure);
       if (editorInstance) {
         try {
@@ -4803,6 +4999,22 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         activeMediaFigure.style.marginLeft = 'auto';
         activeMediaFigure.style.marginRight = '0';
       }
+      const margin = activeMediaFigure.style.margin ||
+        ((activeMediaFigure.style.marginTop || '16px') + ' ' + (activeMediaFigure.style.marginRight || 'auto') + ' ' + (activeMediaFigure.style.marginBottom || '16px') + ' ' + (activeMediaFigure.style.marginLeft || 'auto'));
+      activeMediaFigure.style.margin = margin;
+
+      const url = getMediaUrlFromFigure(activeMediaFigure);
+      if (url) {
+        window._mediaStyleRegistry = window._mediaStyleRegistry || {};
+        const entry = window._mediaStyleRegistry[url] || {
+          width: activeMediaFigure.style.width || '100%',
+          maxWidth: activeMediaFigure.style.maxWidth || '100%'
+        };
+        entry.margin = margin;
+        entry.style = 'width:' + entry.width + ';max-width:' + entry.maxWidth + ';margin:' + margin + ';';
+        window._mediaStyleRegistry[url] = entry;
+      }
+
       showVideoToolbar(activeMediaFigure);
       if (editorInstance) {
         try {
@@ -4814,6 +5026,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     function removeActiveMedia() {
       if (!activeMediaFigure) return;
+      const url = getMediaUrlFromFigure(activeMediaFigure);
+      if (url && window._mediaStyleRegistry) {
+        delete window._mediaStyleRegistry[url];
+      }
       activeMediaFigure.remove();
       hideVideoToolbar();
       activeMediaFigure = null;
@@ -4990,7 +5206,16 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     window.addEventListener('resize', () => { requestAnimationFrame(clampAllBalloons); });
     window.addEventListener('scroll', () => { requestAnimationFrame(clampAllBalloons); }, true);
-    document.addEventListener('selectionchange', () => { requestAnimationFrame(clampAllBalloons); });
+    document.addEventListener('selectionchange', () => {
+      requestAnimationFrame(clampAllBalloons);
+      reapplyAllMediaStyles();
+    });
+    document.addEventListener('focusout', () => {
+      reapplyAllMediaStyles();
+    });
+    window.addEventListener('blur', () => {
+      reapplyAllMediaStyles();
+    });
 
     /* ====== MESSAGE HANDLING (Flutter <-> JS) ====== */
     window.addEventListener('message', (event) => {

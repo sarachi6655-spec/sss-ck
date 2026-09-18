@@ -56,13 +56,16 @@ class HtmlDocumentCodec {
         final String url = node.metadata['url'] as String? ?? '';
         final String poster = node.metadata['poster'] as String? ?? '';
         final String posterAttr = poster.isNotEmpty ? ' poster="$poster"' : '';
+        final String style = node.metadata['style'] as String? ?? '';
+        final String styleAttr = style.isNotEmpty ? ' style="$style"' : '';
+        final String classAttr = node.metadata['class'] as String? ?? 'media';
         if (node.metadata['oembed'] == true) {
-          return '<figure class="media"><oembed url="$url"></oembed></figure>\n';
+          return '<figure class="$classAttr"$styleAttr><oembed url="$url"></oembed></figure>\n';
         }
         if (node.metadata['iframe'] == true) {
-          return '<figure class="media"><iframe src="$url" style="width:100%;aspect-ratio:16/9;border:none;border-radius:8px;" allowfullscreen></iframe></figure>\n';
+          return '<figure class="$classAttr"$styleAttr><iframe src="$url" style="width:100%;aspect-ratio:16/9;border:none;border-radius:8px;" allowfullscreen></iframe></figure>\n';
         }
-        return '<figure class="media"><video src="$url"$posterAttr controls></video></figure>\n';
+        return '<figure class="$classAttr"$styleAttr><video src="$url"$posterAttr controls></video></figure>\n';
       case 'table':
         return _encodeTable(node);
       case 'list':
@@ -391,7 +394,11 @@ class HtmlDocumentCodec {
         nodes.add(EditorNode.video(
           id: 'vid_${nextId()}',
           url: element.attributes['url'] ?? '',
-          metadata: const <String, dynamic>{'oembed': true},
+          metadata: <String, dynamic>{
+            'oembed': true,
+            if (element.attributes['class'] != null) 'class': element.attributes['class'],
+            if (element.attributes['style'] != null) 'style': element.attributes['style'],
+          },
         ));
         break;
 
@@ -399,7 +406,11 @@ class HtmlDocumentCodec {
         nodes.add(EditorNode.video(
           id: 'vid_${nextId()}',
           url: element.attributes['src'] ?? '',
-          metadata: const <String, dynamic>{'iframe': true},
+          metadata: <String, dynamic>{
+            'iframe': true,
+            if (element.attributes['class'] != null) 'class': element.attributes['class'],
+            if (element.attributes['style'] != null) 'style': element.attributes['style'],
+          },
         ));
         break;
 
