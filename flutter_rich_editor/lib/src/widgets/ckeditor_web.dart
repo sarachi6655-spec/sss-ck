@@ -2004,10 +2004,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               {
                 name: 'youtube',
                 url: [
-                  /^(?:m\.)?youtube\.com\/watch\?v=([\w-]+)(?:&.*)?\$/,
-                  /^(?:m\.)?youtube\.com\/v\/([\w-]+)(?:\?.*)?\$/,
-                  /^youtube\.com\/embed\/([\w-]+)(?:\?.*)?\$/,
-                  /^youtu\.be\/([\w-]+)(?:\?.*)?\$/
+                  /(?:m\.)?youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)/,
+                  /(?:m\.)?youtube\.com\/v\/([a-zA-Z0-9_-]+)/,
+                  /youtube\.com\/embed\/([a-zA-Z0-9_-]+)/,
+                  /youtu\.be\/([a-zA-Z0-9_-]+)/,
+                  /youtube\.com\/shorts\/([a-zA-Z0-9_-]+)/
                 ],
                 html: match => {
                   const id = match[1];
@@ -2024,8 +2025,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               {
                 name: 'vimeo',
                 url: [
-                  /^vimeo\.com\/(\d+)/,
-                  /^player\.vimeo\.com\/video\/(\d+)/
+                  /vimeo\.com\/(\d+)/,
+                  /player\.vimeo\.com\/video\/(\d+)/
                 ],
                 html: match => {
                   const id = match[1];
