@@ -266,6 +266,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       display: table !important;
       box-sizing: border-box !important;
     }
+    /* Table Caption */
+    .ck-content figure.table figcaption,
+    .ck-content .table > figcaption {
+      display: block !important;
+      width: 100% !important;
+      box-sizing: border-box !important;
+      text-align: center !important;
+      font-size: 13px !important;
+      color: #64748b !important;
+      font-style: italic !important;
+      padding: 6px 12px !important;
+      margin-top: 6px !important;
+      min-height: 28px !important;
+      line-height: 1.5 !important;
+      word-break: normal !important;
+      white-space: normal !important;
+    }
+    .ck-content figure.table figcaption.ck-editor__nested-editable_focused,
+    .ck-content figure.table figcaption.ck-focused,
+    .ck-content .table > figcaption.ck-editor__nested-editable_focused,
+    .ck-content .table > figcaption.ck-focused {
+      border: 1px dashed #93c5fd !important;
+      background: #f8faff !important;
+      border-radius: 4px !important;
+      outline: none !important;
+    }
     .ck-content table td, .ck-content table th { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; vertical-align: top; min-width: 48px; box-sizing: border-box; }
     .ck-content table th { background: #f1f5f9; font-weight: 600; color: #0f172a; }
     .ck-content table tr:nth-child(even) td { background: #f8fafc; }
