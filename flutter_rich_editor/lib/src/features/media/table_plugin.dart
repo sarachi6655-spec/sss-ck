@@ -1,4 +1,5 @@
 import '../../core/command_bus/editor_command.dart';
+import '../../core/controller/rich_editor_controller.dart';
 import '../../core/document_model/document_value.dart';
 import '../../core/document_model/editor_node.dart';
 import '../../core/document_model/editor_selection.dart';
@@ -465,7 +466,64 @@ class ResizeTableColumnCommand extends EditorCommand {
   }
 }
 
-/// Plugin providing rich tabular data editing (insert, add rows/cols, merge, resize).
+/// Command to insert a dynamic table cell reference into the document text.
+class InsertTableCellReferenceCommand extends EditorCommand {
+  const InsertTableCellReferenceCommand({
+    required this.coord,
+    this.tableIndex = 0,
+    this.tableId,
+  });
+
+  final String coord;
+  final int tableIndex;
+  final String? tableId;
+
+  @override
+  String get id => 'table.insertReference.$coord';
+
+  @override
+  CommandResult execute(DocumentValue document) {
+    final List<EditorNode> updated = List<EditorNode>.from(document.nodes);
+    final EditorSelection sel = document.selection;
+    final int target = sel.nodeIndex >= 0 && sel.nodeIndex < updated.length ? sel.nodeIndex : 0;
+    if (updated.isEmpty) {
+      updated.add(EditorNode.paragraph(id: 'p_${DateTime.now().microsecondsSinceEpoch}', text: ''));
+    }
+
+    final EditorNode targetNode = updated[target];
+    if (targetNode.type == 'table') {
+      return CommandResult.ok(document);
+    }
+
+    // Resolve value from table
+    final int resolvedTIdx = _resolveTableIndex(document, tableId: tableId, tableIndex: tableIndex);
+    String cellVal = '\$$coord';
+    if (resolvedTIdx >= 0 && resolvedTIdx < updated.length) {
+      final EditorNode tableNode = updated[resolvedTIdx];
+      final ({int col, int row})? parsed = RichEditorController.parseCellCoord(coord);
+      if (parsed != null && parsed.row >= 0 && parsed.row < tableNode.children.length) {
+        final EditorNode rowNode = tableNode.children[parsed.row];
+        if (parsed.col >= 0 && parsed.col < rowNode.children.length) {
+          final String raw = rowNode.children[parsed.col].text.trim();
+          if (raw.isNotEmpty) cellVal = raw;
+        }
+      }
+    }
+
+    final String refHtml = '<span class="mention table-cell-ref" data-mention="\$$coord" data-cell-coord="$coord" title="Table cell $coord: $cellVal (Live Link)">$cellVal</span> ';
+    final String currentText = targetNode.text;
+    final int offset = sel.baseOffset.clamp(0, currentText.length);
+    final String newText = '${currentText.substring(0, offset)}$refHtml${currentText.substring(offset)}';
+
+    updated[target] = targetNode.copyWith(text: newText);
+    return CommandResult.ok(document.copyWith(
+      nodes: updated,
+      selection: EditorSelection.collapsed(offset + refHtml.length, nodeIndex: target),
+    ));
+  }
+}
+
+/// Plugin providing rich tabular data editing (insert, add rows/cols, merge, resize, cell references).
 class TablePlugin extends EditorPlugin {
   const TablePlugin();
 
@@ -484,5 +542,6 @@ class TablePlugin extends EditorPlugin {
         DeleteTableColumnCommand(),
         DeleteTableCommand(),
         ToggleTableHeaderRowCommand(),
+        InsertTableCellReferenceCommand(coord: 'A1'),
       ];
 }

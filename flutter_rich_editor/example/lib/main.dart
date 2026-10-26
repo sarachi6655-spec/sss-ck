@@ -229,6 +229,10 @@ class _EditorShowcasePageState extends State<EditorShowcasePage> {
                   config: const EditorConfig(
                     placeholder: 'Type your clinical observations or research notes here...',
                   ),
+                  onVoiceInput: () async {
+                    // Demo voice input callback
+                    return '<p>🎙️ <em>Transcribed voice note: clinical summary generated successfully.</em></p>';
+                  },
                 ),
               ),
             );

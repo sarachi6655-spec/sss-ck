@@ -18,6 +18,7 @@ class CKEditorWebView extends StatefulWidget {
     required this.placeholder,
     required this.onContentChanged,
     this.onEditorReady,
+    this.onVoiceInput,
   });
 
   final String initialHtml;
@@ -25,6 +26,11 @@ class CKEditorWebView extends StatefulWidget {
   final String placeholder;
   final void Function(String html) onContentChanged;
   final void Function(void Function(String html) setHtml)? onEditorReady;
+
+  /// Called when the user completes a voice recording in the editor.
+  /// Receives the raw transcribed [text], calls your API, and returns the
+  /// HTML to be inserted. Return `null` to cancel insertion.
+  final Future<String?> Function(String text)? onVoiceInput;
 
   @override
   State<CKEditorWebView> createState() => _CKEditorWebViewState();
@@ -80,7 +86,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       iframe.style.border = 'none';
       iframe.style.width = '100%';
       iframe.style.height = '100%';
-      iframe.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen');
+      iframe.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen; microphone');
       iframe.setAttribute('allowfullscreen', 'true');
       iframe.srcdoc = _generateHtmlTemplate().toJS;
       _iframe = iframe;
@@ -108,6 +114,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 final String html = decoded['html'] as String? ?? '';
                 _lastReportedHtml = html;
                 widget.onContentChanged(html);
+              } else if (type == 'voice_input') {
+                final String text = decoded['text'] as String? ?? '';
+                _handleVoiceInput(text);
+              } else if (type == 'ai_generate_request') {
+                final String text = decoded['text'] as String? ?? '';
+                _handleAiGenerate(text);
               }
             }
           } catch (_) {}
@@ -116,6 +128,275 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }).toJS;
     _messageListener = listener;
     web.window.addEventListener('message', listener);
+  }
+
+  /// Handles an AI generation request from the in-editor AI modal.
+  /// Calls [widget.onVoiceInput] with the user-reviewed prompt and inserts
+  /// the returned HTML upon completion.
+  Future<void> _handleAiGenerate(String promptText) async {
+    if (promptText.trim().isEmpty) return;
+    if (!mounted) return;
+
+    if (widget.onVoiceInput == null) {
+      _sendAiError('No AI generation handler is configured on the editor.');
+      return;
+    }
+
+    try {
+      final String? html = await widget.onVoiceInput!(promptText.trim());
+      if (html != null && html.isNotEmpty) {
+        _insertVoiceHtml(html);
+      } else {
+        _sendAiError('The AI generation API returned no content.');
+      }
+    } catch (e) {
+      _sendAiError('AI generation failed: $e');
+    }
+  }
+
+  /// Sends an error message to the iframe so the AI modal can display it.
+  void _sendAiError(String error) {
+    if (_iframe?.contentWindow == null) return;
+    _iframe!.contentWindow!.postMessage(
+      jsonEncode(<String, dynamic>{
+        'type': 'ai_generate_error',
+        'error': error,
+      }).toJS,
+      '*'.toJS,
+    );
+  }
+
+  /// Receives the transcribed [text] from JS, shows a correction bottom sheet
+  /// so the user can review/edit the transcript, calls [onVoiceInput] with
+  /// the user's content, and inserts the returned HTML into CKEditor.
+  Future<void> _handleVoiceInput(String text) async {
+    if (text.isEmpty) return;
+    if (!mounted) return;
+
+    // Show the correction / review dialog and call onVoiceInput when confirmed.
+    final String? html = await _showVoiceCorrectionSheet(text, widget.onVoiceInput);
+    if (html != null && html.isNotEmpty) {
+      _insertVoiceHtml(html);
+    }
+  }
+
+  /// Shows a bottom sheet where the user can review and correct the auto-transcribed
+  /// text before it is sent to the API.
+  ///
+  /// Calls [onVoiceInput] with the user's content when they tap Insert,
+  /// displaying a progress indicator until the HTML response is received.
+  Future<String?> _showVoiceCorrectionSheet(
+    String initialText,
+    Future<String?> Function(String)? onVoiceInput,
+  ) async {
+    final TextEditingController textCtrl = TextEditingController(text: initialText);
+    textCtrl.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: initialText.length,
+    );
+
+    bool isLoading = false;
+    String? errorMessage;
+
+    final String? result = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (BuildContext ctx) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Color(0xFF1E293B),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    // Drag handle
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF475569),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    // Title row
+                    Row(
+                      children: <Widget>[
+                        const Text('\u{2728}', style: TextStyle(fontSize: 20)),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Generate with AI',
+                            style: TextStyle(
+                              color: Color(0xFFF1F5F9),
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: isLoading ? null : () => Navigator.of(ctx).pop(),
+                          icon: const Icon(Icons.close, color: Color(0xFF94A3B8)),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Review or edit your prompt before sending to the API.',
+                      style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    // Editable transcript field
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: TextField(
+                        controller: textCtrl,
+                        maxLines: 5,
+                        minLines: 2,
+                        autofocus: true,
+                        enabled: !isLoading,
+                        style: const TextStyle(
+                          color: Color(0xFFE2E8F0),
+                          fontSize: 14,
+                          height: 1.6,
+                        ),
+                        decoration: const InputDecoration(
+                          contentPadding: EdgeInsets.all(12),
+                          border: InputBorder.none,
+                          hintText: 'Your transcribed text\u2026',
+                          hintStyle: TextStyle(color: Color(0xFF475569)),
+                        ),
+                      ),
+                    ),
+                    if (errorMessage != null) ...<Widget>[
+                      const SizedBox(height: 10),
+                      Text(
+                        errorMessage!,
+                        style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    // Action buttons
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: isLoading ? null : () => Navigator.of(ctx).pop(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF94A3B8),
+                              side: const BorderSide(color: Color(0xFF334155)),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text('Cancel'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: FilledButton.icon(
+                            onPressed: (isLoading || textCtrl.text.trim().isEmpty)
+                                ? null
+                                : () async {
+                                    final String promptText = textCtrl.text.trim();
+                                    if (onVoiceInput == null) {
+                                      Navigator.of(ctx).pop('<p>$promptText</p>');
+                                      return;
+                                    }
+                                    setSheetState(() {
+                                      isLoading = true;
+                                      errorMessage = null;
+                                    });
+                                    try {
+                                      final String? html = await onVoiceInput(promptText);
+                                      if (ctx.mounted) {
+                                        if (html != null && html.isNotEmpty) {
+                                          Navigator.of(ctx).pop(html);
+                                        } else {
+                                          setSheetState(() {
+                                            isLoading = false;
+                                            errorMessage = 'Failed to generate HTML content.';
+                                          });
+                                        }
+                                      }
+                                    } catch (e) {
+                                      if (ctx.mounted) {
+                                        setSheetState(() {
+                                          isLoading = false;
+                                          errorMessage = 'AI Generation Error: $e';
+                                        });
+                                      }
+                                    }
+                                  },
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF3B82F6),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: isLoading
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.send_rounded, size: 16),
+                            label: Text(
+                              isLoading ? 'Generating HTML\u2026' : '\u{2728} Generate with AI',
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    textCtrl.dispose();
+    return result;
+  }
+
+  /// Sends an `insertVoiceHtml` message into the iframe so the JS layer can
+  /// insert the HTML at the current cursor position in CKEditor.
+  void _insertVoiceHtml(String html) {
+    if (_iframe?.contentWindow == null) return;
+    _iframe!.contentWindow!.postMessage(
+      jsonEncode(<String, dynamic>{
+        'type': 'insertVoiceHtml',
+        'html': html,
+      }).toJS,
+      '*'.toJS,
+    );
   }
 
   void setHtml(String html) {
@@ -145,9 +426,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
   String _generateHtmlTemplate() {
     final String darkClass = widget.isDark ? 'dark' : 'light';
-    final String initialJson = jsonEncode(widget.initialHtml);
-    final String placeholderJson = jsonEncode(widget.placeholder);
-    final String editorIdJson = jsonEncode(_editorId);
+    final String initialJson = jsonEncode(widget.initialHtml).replaceAll('<', r'\u003c');
+    final String placeholderJson = jsonEncode(widget.placeholder).replaceAll('<', r'\u003c');
+    final String editorIdJson = jsonEncode(_editorId).replaceAll('<', r'\u003c');
+    final bool isInitialRtl = widget.initialHtml.contains('dir="rtl"') || widget.initialHtml.contains("dir='rtl'") || widget.initialHtml.contains('direction:rtl') || widget.initialHtml.contains('direction: rtl');
+    final String initialDir = isInitialRtl ? 'rtl' : 'ltr';
+    final String ltrSelected = !isInitialRtl ? 'selected' : '';
+    final String rtlSelected = isInitialRtl ? 'selected' : '';
 
     return '''<!DOCTYPE html>
 <html lang="en">
@@ -158,23 +443,17 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="format-detection" content="telephone=no">
   <title>CKEditor 5 — Full Featured</title>
-  <!-- CKEditor 5 Super Build loaded dynamically in body script -->
-  <!-- jsPDF for Export to PDF -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.2/jspdf.umd.min.js"></script>
-  <!-- html2canvas for PDF rendering -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <!-- KaTeX for math equations -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <!-- Google Fonts for rich typography (Calibri fallbacks, Inter, Roboto, Lato, Poppins, etc.) -->
+  <!-- Non-blocking KaTeX CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" media="print" onload="this.media='all'">
+  <!-- Non-blocking Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Roboto:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Montserrat:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Roboto:ital,wght@0,400;0,500;0,700;1,400;1,500;1,700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
   <style>
     /* ====== RESET & BASE ====== */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body {
-      width: 100%; height: 100%; height: 100dvh; overflow: hidden;
+      width: 100%; height: 100%; min-height: 100%; overflow: hidden;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
       font-size: 14px;
       background: #ffffff; color: #1e293b;
@@ -182,9 +461,21 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       -webkit-tap-highlight-color: transparent;
       transition: background 0.2s, color 0.2s;
     }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    @keyframes voicePulse {
+      0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+      70% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+    }
+    #btn-voice-to-text.listening {
+      background: #dc2626 !important;
+      color: #ffffff !important;
+      border-color: #b91c1c !important;
+      animation: voicePulse 1.5s infinite;
+    }
     /* ====== MAIN LAYOUT ====== */
     #app-container {
-      display: flex; flex-direction: column; width: 100%; height: 100%; height: 100dvh;
+      display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 100%;
       position: relative; overflow: hidden;
     }
     #app-container.fullscreen-mode {
@@ -229,11 +520,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     #action-bar .separator { width: 1px; height: 20px; background: #cbd5e1; margin: 0 4px; flex-shrink: 0; }
     /* ====== EDITOR WRAPPER ====== */
     #editor-wrapper {
-      display: flex; flex: 1 1 auto; overflow: hidden; position: relative;
+      display: flex; flex: 1 1 auto; overflow: hidden; position: relative; min-height: 250px;
     }
     #editor-main {
       flex: 1 1 auto; display: flex; flex-direction: column;
-      overflow: hidden; min-width: 0;
+      overflow: hidden; min-width: 0; min-height: 250px;
     }
     /* ====== CKEDITOR CUSTOMIZATION ====== */
     .ck.ck-editor { display: flex !important; flex-direction: column !important; height: 100% !important; width: 100% !important; border: none !important; border-radius: 0 !important; }
@@ -271,13 +562,26 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       box-sizing: border-box !important;
     }
     .ck-content figure.table table,
-    .ck-content table {
+    .ck-content table,
+    #fallback-content table {
       border-collapse: collapse !important;
       width: 100% !important;
       min-width: 100% !important;
       margin: 0 !important;
       display: table !important;
       box-sizing: border-box !important;
+      /* Columns keep their set widths (equal, or the dragged <colgroup> widths); content wraps instead of widening them */
+      table-layout: fixed !important;
+    }
+    .ck-content table td, .ck-content table th,
+    #fallback-content table td, #fallback-content table th {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+    .ck-content table td img, .ck-content table th img,
+    .ck-content table td figure, .ck-content table th figure {
+      max-width: 100%;
+      height: auto;
     }
     /* Table Caption */
     .ck-content figure.table figcaption,
@@ -425,6 +729,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-content figure.media.media-align-left { margin-left: 0 !important; margin-right: auto !important; }
     .ck-content figure.media.media-align-center { margin-left: auto !important; margin-right: auto !important; }
     .ck-content figure.media.media-align-right { margin-left: auto !important; margin-right: 0 !important; }
+    /* CKEditor blocks clicks on raw HTML embeds (iframe/video) while editing; allow them in Preview so they can play */
+    .ck-editor__editable.ck-read-only .html-object-embed .html-object-embed__content { pointer-events: auto; }
     
     /* Video interactive floating resize toolbar */
     .video-resize-toolbar {
@@ -565,6 +871,233 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
     body.dark .ck-content .mention {
       background: #313244; color: #89b4fa;
+    }
+
+    /* ====== TABLE CELL REFERENCE PILL STYLES ====== */
+    .ck-content .table-cell-ref,
+    .ck-content span[data-cell-coord],
+    .ck-content .mention[data-mention^="\$"],
+    #fallback-content .table-cell-ref,
+    #fallback-content span[data-cell-coord],
+    #fallback-content .mention[data-mention^="\$"] {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 3px;
+      background: #f0fdf4 !important;
+      color: #15803d !important;
+      border: 1px solid #86efac !important;
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-weight: 600;
+      font-size: 0.95em;
+      cursor: pointer;
+      user-select: all;
+      transition: all 0.15s ease;
+      vertical-align: baseline;
+      text-decoration: none !important;
+    }
+    .ck-content .table-cell-ref::before,
+    .ck-content span[data-cell-coord]::before,
+    .ck-content .mention[data-mention^="\$"]::before,
+    #fallback-content .table-cell-ref::before,
+    #fallback-content span[data-cell-coord]::before,
+    #fallback-content .mention[data-mention^="\$"]::before {
+      content: "📊 ";
+      font-size: 0.85em;
+      opacity: 0.85;
+    }
+    .ck-content .table-cell-ref:hover,
+    .ck-content span[data-cell-coord]:hover,
+    .ck-content .mention[data-mention^="\$"]:hover,
+    #fallback-content .table-cell-ref:hover,
+    #fallback-content span[data-cell-coord]:hover,
+    #fallback-content .mention[data-mention^="\$"]:hover {
+      background: #dcfce7 !important;
+      border-color: #4ade80 !important;
+      box-shadow: 0 1px 4px rgba(22, 101, 52, 0.2);
+    }
+    /* Anti-nesting: prevent nested borders or duplicate icons */
+    .ck-content .table-cell-ref .table-cell-ref,
+    .ck-content .mention[data-mention^="\$"] .table-cell-ref,
+    .ck-content .table-cell-ref .mention,
+    .ck-content span[data-cell-coord] span[data-cell-coord] {
+      border: none !important;
+      background: transparent !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+    }
+    .ck-content .table-cell-ref .table-cell-ref::before,
+    .ck-content .mention[data-mention^="\$"] .table-cell-ref::before,
+    .ck-content .table-cell-ref .mention::before,
+    .ck-content span[data-cell-coord] span[data-cell-coord]::before {
+      content: "" !important;
+      display: none !important;
+    }
+    body.dark .ck-content .table-cell-ref,
+    body.dark .ck-content span[data-cell-coord],
+    body.dark .ck-content .mention[data-mention^="\$"],
+    body.dark #fallback-content .table-cell-ref,
+    body.dark #fallback-content span[data-cell-coord],
+    body.dark #fallback-content .mention[data-mention^="\$"] {
+      background: #14532d !important;
+      color: #86efac !important;
+      border-color: #166534 !important;
+    }
+    /* Highlight for a referenced cell: an overlay above the table, so CKEditor re-renders and
+       collapsed-border cell painting (no box-shadow on td) cannot hide it */
+    @keyframes cellRefPulse {
+      0%, 100% { background: rgba(34, 197, 94, 0.18); box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45); }
+      50% { background: rgba(34, 197, 94, 0.32); box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+    }
+    .cell-ref-highlight-overlay {
+      position: fixed;
+      pointer-events: none;
+      z-index: 9000;
+      border: 2px solid #16a34a;
+      border-radius: 3px;
+      box-sizing: border-box;
+      animation: cellRefPulse 0.9s ease-in-out 3;
+      transition: opacity 0.3s ease;
+    }
+    /* ====== INLINE FORMULA PILL STYLES (OUTSIDE TABLES) ====== */
+    .ck-content .inline-formula-pill,
+    .ck-content span[data-formula]:not(td):not(th):not(.formula-badge),
+    #fallback-content .inline-formula-pill,
+    #fallback-content span[data-formula]:not(td):not(th):not(.formula-badge) {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 3px;
+      background: #f5f3ff !important;
+      color: #6d28d9 !important;
+      border: 1px solid #c4b5fd !important;
+      border-radius: 5px;
+      padding: 1px 7px;
+      font-weight: 600;
+      font-size: 0.95em;
+      cursor: pointer;
+      user-select: all;
+      transition: all 0.15s ease;
+      vertical-align: baseline;
+      text-decoration: none !important;
+    }
+    .ck-content .inline-formula-pill::before,
+    .ck-content span[data-formula]:not(td):not(th):not(.formula-badge)::before,
+    #fallback-content .inline-formula-pill::before,
+    #fallback-content span[data-formula]:not(td):not(th):not(.formula-badge)::before {
+      content: "fx ";
+      font-style: italic;
+      font-weight: 700;
+      font-size: 0.88em;
+      color: #7c3aed;
+      opacity: 0.9;
+    }
+    .ck-content .inline-formula-pill:hover,
+    .ck-content span[data-formula]:not(td):not(th):not(.formula-badge)::hover,
+    #fallback-content .inline-formula-pill:hover,
+    #fallback-content span[data-formula]:not(td):not(th):not(.formula-badge)::hover {
+      background: #ede9fe !important;
+      border-color: #a78bfa !important;
+      box-shadow: 0 1px 4px rgba(109, 40, 217, 0.25);
+    }
+    /* Anti-nesting: prevent nested borders or duplicate icons */
+    .ck-content .inline-formula-pill .inline-formula-pill,
+    .ck-content .inline-formula-pill .table-cell-ref,
+    .ck-content .table-cell-ref .inline-formula-pill {
+      border: none !important;
+      background: transparent !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+    }
+    .ck-content .inline-formula-pill .inline-formula-pill::before {
+      content: "" !important;
+      display: none !important;
+    }
+    body.dark .ck-content .inline-formula-pill,
+    body.dark .ck-content span[data-formula]:not(td):not(th):not(.formula-badge),
+    body.dark #fallback-content .inline-formula-pill,
+    body.dark #fallback-content span[data-formula]:not(td):not(th):not(.formula-badge) {
+      background: #2e1065 !important;
+      color: #ddd6fe !important;
+      border-color: #5b21b6 !important;
+    }
+    body.dark .ck-content .inline-formula-pill::before,
+    body.dark #fallback-content .inline-formula-pill::before {
+      color: #c4b5fd !important;
+    }
+    /* Cell Reference Dropdown / Autocomplete styling */
+    .ck.ck-list__item .table-cell-mention-btn {
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 10px !important;
+      width: 100% !important;
+      box-sizing: border-box;
+      border: none !important;
+      background: transparent;
+      cursor: pointer;
+    }
+    .ck.ck-list__item .table-cell-mention-btn:hover {
+      background: #f0fdf4 !important;
+    }
+    .cell-coord-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #dcfce7;
+      color: #15803d;
+      font-weight: bold;
+      font-family: monospace;
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid #86efac;
+      flex-shrink: 0;
+    }
+    .cell-val-text {
+      font-weight: 500;
+      color: #1e293b;
+      max-width: 170px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cell-meta-text {
+      font-size: 11px;
+      color: #64748b;
+      font-style: italic;
+      flex-shrink: 0;
+    }
+    body.dark .cell-coord-badge {
+      background: #14532d;
+      color: #86efac;
+      border-color: #166534;
+    }
+    body.dark .cell-val-text {
+      color: #f1f5f9;
+    }
+    body.dark .cell-meta-text {
+      color: #94a3b8;
+    }
+    /* Clean printing for reports */
+    @media print {
+      .table-cell-ref,
+      span[data-cell-coord],
+      .mention[data-mention^="\$"] {
+        display: inline !important;
+        background: transparent !important;
+        color: inherit !important;
+        border: none !important;
+        padding: 0 !important;
+        font-weight: inherit !important;
+        box-shadow: none !important;
+      }
+      .table-cell-ref::before,
+      span[data-cell-coord]::before,
+      .mention[data-mention^="\$"]::before {
+        display: none !important;
+        content: "" !important;
+      }
     }
 
     /* ====== SLASH MODAL STYLES ====== */
@@ -709,10 +1242,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     #fallback-toolbar button, #fallback-toolbar select { padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 4px; background: white; cursor: pointer; font-size: 13px; }
     #fallback-toolbar button:hover { background: #e2e8f0; }
     #fallback-content { flex: 1; overflow-y: auto; padding: 24px 32px; font-size: 15px; line-height: 1.6; outline: none; }
+    #fallback-content.show-blocks > * { outline: 1px dashed #94a3b8; outline-offset: 2px; }
     body.dark #fallback-container { border-color: #45475a; }
     body.dark #fallback-toolbar { background: #313244; border-color: #45475a; }
     body.dark #fallback-toolbar button, body.dark #fallback-toolbar select { background: #45475a; color: #cdd6f4; border-color: #585b70; }
     body.dark #fallback-content { background: #181825; color: #cdd6f4; }
+    .fallback-sep { width: 1px; height: 20px; background: #e2e8f0; margin: 0 4px; align-self: center; }
+    body.dark .fallback-sep { background: #585b70; }
 
 
     /* ====== DROPDOWN OVERFLOW & TABLE GRID FIX ====== */
@@ -850,6 +1386,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     .ck-balloon-panel {
       z-index: 10000 !important;
     }
+    .ck.ck-balloon-panel.balloon-clamped::before,
+    .ck.ck-balloon-panel.balloon-clamped::after {
+      display: none !important;
+    }
 
     /* Only Form/Dialog Balloons (Table Properties, Cell Properties, Link Form) get card styling and scroll */
     .ck.ck-balloon-panel:has(.ck-form),
@@ -881,6 +1421,21 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       padding: 0 !important;
     }
 
+    /* CKEditor 41 wraps forms in .ck-balloon-rotator (no __content element): let it shrink and scroll
+       inside the height-limited panel so Save/Cancel stay reachable */
+    .ck.ck-balloon-panel:has(.ck-form) > .ck-balloon-rotator,
+    .ck.ck-balloon-panel:has(.ck-table-properties-form) > .ck-balloon-rotator,
+    .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) > .ck-balloon-rotator,
+    .ck.ck-balloon-panel_with-form > .ck-balloon-rotator {
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+      -webkit-overflow-scrolling: touch !important;
+      scrollbar-width: thin !important;
+      scrollbar-color: #cbd5e1 transparent !important;
+    }
+
     .ck.ck-balloon-panel:has(.ck-form) .ck-balloon-panel__content::-webkit-scrollbar,
     .ck.ck-balloon-panel:has(.ck-table-properties-form) .ck-balloon-panel__content::-webkit-scrollbar,
     .ck.ck-balloon-panel:has(.ck-table-cell-properties-form) .ck-balloon-panel__content::-webkit-scrollbar {
@@ -894,7 +1449,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     /* Contextual Toolbars (Table Toolbar, etc.) MUST be visible and horizontal */
-    .ck.ck-balloon-panel:not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) {
+    .ck.ck-balloon-panel:not(.ck-tooltip):not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) {
       overflow: visible !important;
       max-width: none !important;
       max-height: none !important;
@@ -903,10 +1458,32 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       box-shadow: none !important;
     }
 
-    .ck.ck-balloon-panel:not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) .ck-balloon-panel__content {
+    .ck.ck-balloon-panel:not(.ck-tooltip):not(:has(.ck-form)):not(:has(.ck-table-properties-form)):not(:has(.ck-table-cell-properties-form)) .ck-balloon-panel__content {
       overflow: visible !important;
       max-height: none !important;
       padding: 0 !important;
+    }
+
+    /* Toolbar tooltips: dark chip with white text (the arrow follows --ck-color-panel-background) */
+    .ck.ck-balloon-panel.ck-tooltip {
+      --ck-color-panel-background: #1e293b;
+      --ck-color-tooltip-background: #1e293b;
+      --ck-color-tooltip-text: #ffffff;
+      background: #1e293b !important;
+      border: none !important;
+      border-radius: 6px !important;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.25) !important;
+    }
+    .ck.ck-balloon-panel.ck-tooltip .ck-tooltip__text {
+      color: #ffffff !important;
+      font-size: 12px !important;
+      font-weight: 500 !important;
+      padding: 4px 8px !important;
+    }
+    body.dark .ck.ck-balloon-panel.ck-tooltip {
+      --ck-color-panel-background: #11111b;
+      --ck-color-tooltip-background: #11111b;
+      background: #11111b !important;
     }
 
     .ck.ck-balloon-panel .ck-toolbar {
@@ -1372,65 +1949,353 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       .modal-box { max-height: 96dvh !important; padding: 10px !important; }
     }
 
+    /* ====== RTL & LTR BIDIRECTIONAL TEXT STYLES ====== */
+    .ck-content[dir="rtl"],
+    #fallback-content[dir="rtl"] {
+      direction: rtl !important;
+      text-align: right !important;
+    }
+    .ck-content[dir="rtl"] p,
+    .ck-content[dir="rtl"] h1,
+    .ck-content[dir="rtl"] h2,
+    .ck-content[dir="rtl"] h3,
+    .ck-content[dir="rtl"] h4,
+    .ck-content[dir="rtl"] h5,
+    .ck-content[dir="rtl"] h6,
+    .ck-content[dir="rtl"] div:not(.math-block):not(.media),
+    .ck-content[dir="rtl"] li,
+    .ck-content[dir="rtl"] table td,
+    .ck-content[dir="rtl"] table th,
+    #fallback-content[dir="rtl"] p,
+    #fallback-content[dir="rtl"] h1,
+    #fallback-content[dir="rtl"] h2,
+    #fallback-content[dir="rtl"] h3,
+    #fallback-content[dir="rtl"] li,
+    #fallback-content[dir="rtl"] table td,
+    #fallback-content[dir="rtl"] table th {
+      direction: rtl !important;
+      text-align: right !important;
+    }
+    .ck-content[dir="rtl"] ul,
+    .ck-content[dir="rtl"] ol,
+    #fallback-content[dir="rtl"] ul,
+    #fallback-content[dir="rtl"] ol {
+      padding-right: 28px !important;
+      padding-left: 0 !important;
+    }
+    .ck-content[dir="rtl"] blockquote,
+    #fallback-content[dir="rtl"] blockquote {
+      border-right: 4px solid #3b82f6 !important;
+      border-left: none !important;
+      border-radius: 8px 0 0 8px !important;
+      text-align: right !important;
+      direction: rtl !important;
+    }
+    .ck-content[dir="ltr"],
+    #fallback-content[dir="ltr"] {
+      direction: ltr !important;
+      text-align: left !important;
+    }
+    .ck-content[dir="ltr"] p,
+    .ck-content[dir="ltr"] h1,
+    .ck-content[dir="ltr"] h2,
+    .ck-content[dir="ltr"] h3,
+    .ck-content[dir="ltr"] h4,
+    .ck-content[dir="ltr"] h5,
+    .ck-content[dir="ltr"] h6,
+    .ck-content[dir="ltr"] div:not(.math-block):not(.media),
+    .ck-content[dir="ltr"] li,
+    .ck-content[dir="ltr"] table td,
+    .ck-content[dir="ltr"] table th,
+    #fallback-content[dir="ltr"] p,
+    #fallback-content[dir="ltr"] h1,
+    #fallback-content[dir="ltr"] h2,
+    #fallback-content[dir="ltr"] h3,
+    #fallback-content[dir="ltr"] li,
+    #fallback-content[dir="ltr"] table td,
+    #fallback-content[dir="ltr"] table th {
+      direction: ltr !important;
+      text-align: left !important;
+    }
+
     /* ====== PRINT STYLES ====== */
+    @page {
+      size: A4 portrait;
+      margin: 15mm 15mm 15mm 15mm;
+    }
     @media print {
-      #action-bar, #status-bar, #side-panel, .ck-toolbar { display: none !important; }
-      .ck-content { padding: 0 !important; }
+      /* Hide non-printable interactive chrome, toolbars, buttons, and popups */
+      #action-bar,
+      #status-bar,
+      #side-panel,
+      .ck.ck-editor__top,
+      .ck-toolbar,
+      .ck.ck-toolbar,
+      .video-resize-toolbar,
+      .video-resize-handle,
+      .formula-badge,
+      .modal-overlay,
+      .ck-balloon-panel,
+      .ck-balloon-rotator,
+      #toast-notification,
+      .ck-editor__nested-editable_focused,
+      .ck-widget__resizer {
+        display: none !important;
+        visibility: hidden !important;
+      }
+
+      /* Reset viewport/height and overflow locks so print layout engine can paginate naturally across multiple pages */
+      html, body {
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        position: static !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+
+      #app-container,
+      #editor-wrapper,
+      #editor-main {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        overflow-x: visible !important;
+        overflow-y: visible !important;
+        position: static !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+
+      .ck.ck-editor {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        position: static !important;
+        border: none !important;
+        box-shadow: none !important;
+      }
+
+      .ck.ck-editor__main {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        position: static !important;
+      }
+
+      .ck.ck-editor__main > .ck-editor__editable,
+      .ck-content,
+      #fallback-content {
+        display: block !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        position: static !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border: none !important;
+        box-shadow: none !important;
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+
+      /* Clean page break support */
+      .page-break,
+      .ck-content .page-break,
+      [data-page-break] {
+        display: block !important;
+        clear: both !important;
+        page-break-after: always !important;
+        break-after: page !important;
+        page-break-before: auto !important;
+        break-before: auto !important;
+        height: 0 !important;
+        min-height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        visibility: hidden !important;
+      }
+
+      /* Avoid awkward cuts inside blocks */
+      h1, h2, h3, h4, h5, h6 {
+        page-break-after: avoid !important;
+        break-after: avoid !important;
+      }
+
+      figure.table,
+      .ck-content table,
+      table {
+        page-break-inside: auto !important;
+        break-inside: auto !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+      }
+
+      tr, th, td {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+
+      figure.image,
+      figure.media,
+      .media,
+      img,
+      pre,
+      blockquote,
+      .math-block {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        max-width: 100% !important;
+      }
+
+      figure.media iframe,
+      figure.media video,
+      .media iframe,
+      .media video {
+        max-width: 100% !important;
+        box-shadow: none !important;
+      }
     }
   </style>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js"></script>
 </head>
 <body class="$darkClass">
   <div id="app-container">
     <!-- ==== ACTION BAR (Premium-like features) ==== -->
     <div id="action-bar">
-      <button onclick="toggleFullscreen()" id="btn-fullscreen" title="Toggle Fullscreen (Maximize Editor)" style="background:#eff6ff;color:#1d4ed8;font-weight:600;border-color:#bfdbfe;">⛶ Fullscreen</button>
-      <div class="separator"></div>
-      <button onclick="exportToPDF()" title="Export to PDF">📄 PDF</button>
-      <button onclick="exportToWord()" title="Export to Word">📝 Word</button>
-      <button onclick="importFromWord()" title="Import from Word">📂 Import</button>
+      <!-- <button onclick="toggleFullscreen()" id="btn-fullscreen" title="Toggle Fullscreen (Maximize Editor)" style="background:#eff6ff;color:#1d4ed8;font-weight:600;border-color:#bfdbfe;">⛶ Fullscreen</button>
+      <div class="separator"></div> -->
+      <button onclick="exportToPDF()" title="Export to PDF (opens Print, then choose Save as PDF)">📄 PDF</button>
+      <button onclick="exportToWord()" title="Export to Word (.docx)">📝 Word</button>
+      <button onclick="importFromWord()" title="Import a document (Word, HTML, RTF or TXT)">📂 Import</button>
       <button onclick="printEditor()" title="Print">🖨️ Print</button>
       <div class="separator"></div>
-      <button onclick="toggleTrackChanges()" id="btn-track-changes" title="Track Changes">📋 Track</button>
-      <button onclick="openPanel('comments')" title="Comments">💬 Comments</button>
+      <!-- <button onclick="toggleTrackChanges()" id="btn-track-changes" title="Track Changes">📋 Track</button> -->
+      <!-- <button onclick="openPanel('comments')" title="Comments">💬 Comments</button> -->
       <button onclick="openPanel('revisions')" title="Revision History">🕐 History</button>
       <button onclick="openPanel('outline')" title="Document Outline">📑 Outline</button>
       <div class="separator"></div>
-      <button onclick="showFormulaHelpModal()" title="Table Formulas (100% Auto-Calculating on keystroke)">⚡ Formulas (Auto)</button>
+      <button onclick="showFormulaHelpModal()" title="Add or edit a formula in the selected table cell">⚡ Formulas (Auto)</button>
       <button onclick="openTableColorModal()" id="btn-table-color" title="Color Table Cells, Columns, Rows or Entire Table" style="background:#fef3c7;color:#92400e;font-weight:600;border-color:#fcd34d;">🎨 Table Color</button>
+      <button onclick="showCellRefModal()" id="btn-cell-ref" title="Reference Table Cell in Text (Type \$ or \$A1)" style="background:#f0fdf4;color:#15803d;font-weight:600;border-color:#bbf7d0;">🔗 Ref Cell (\$)</button>
       <div class="separator"></div>
-      <button onclick="showTemplateModal()" title="Insert Template">📋 Templates</button>
-      <button onclick="showMathModal()" title="Insert Math Equation">∑ Math</button>
+      <button onclick="showTemplateModal()" title="Insert Template" style="display:none;">📋 Templates</button>
+      <button onclick="openAiPromptModal()" id="btn-ai-generate" title="Generate with AI (Type or Speak)" style="background:#f5f3ff;color:#7c3aed;font-weight:600;border-color:#ddd6fe;display:inline-flex;align-items:center;gap:4px;">✨ Generate</button>
+      <button onclick="toggleDirectVoiceInput()" id="btn-voice-to-text" title="Voice to Text — Dictate speech directly into document" style="background:#fef2f2;color:#dc2626;font-weight:600;border-color:#fecaca;display:inline-flex;align-items:center;gap:4px;"><span id="btn-voice-icon">🎙️</span><span id="btn-voice-label">Voice to Text</span></button>
+      <button onclick="showMathModal()" id="btn-math" title="Insert Math Equation" style="display:none;">∑ Math</button>
       <button onclick="insertPageBreak()" title="Insert Page Break">📃 Page Break</button>
       <button onclick="openVideoModal()" id="btn-video" title="Insert & Resize Video (YouTube, Vimeo, MP4)" style="background:#ede9fe;color:#5b21b6;border-color:#ddd6fe;font-weight:600;">🎬 Video</button>
-      <button onclick="showSlashModal()" title="Slash Commands & Quick Insert (Cmd+/)">⚡ / Slash</button>
-      <button onclick="toggleShowBlocks()" id="btn-show-blocks" title="Show Blocks">¶ Blocks</button>
+      <button onclick="showSlashModal()" title="Slash Commands & Quick Insert (Cmd+/)" style="display:none;">⚡ / Slash</button>
+      <button onclick="toggleShowBlocks()" id="btn-show-blocks" title="Show Blocks" style="display:none;">¶ Blocks</button>
       <div class="separator"></div>
-      <button onclick="formatPainter()" id="btn-format-painter" title="Format Painter">🖌️ Painter</button>
-      <button onclick="harmonizeSelectionStyles()" id="btn-harmonize" title="Match Document Style (Normalize fonts/sizes in pasted content)" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0;font-weight:600;">🧹 Harmonize</button>
-      <button onclick="toggleReadonly()" id="btn-readonly" title="Toggle Read Only">🔒 ReadOnly</button>
-      <select onchange="changeLanguage(this.value)" title="Text Direction">
-        <option value="ltr">LTR</option>
-        <option value="rtl">RTL</option>
+      <button onclick="formatPainter()" id="btn-format-painter" title="Format Painter" style="display:none;">🖌️ Painter</button>
+      <button onclick="harmonizeSelectionStyles()" id="btn-harmonize" title="Match Document Style (Normalize fonts/sizes in pasted content)" style="display:none;background:#f0fdf4;color:#166534;border-color:#bbf7d0;font-weight:600;">🧹 Harmonize</button>
+      <button onclick="toggleReadonly()" id="btn-readonly" title="Toggle Preview (Read Only)">👁️ Preview</button>
+      <select onchange="changeLanguage(this.value)" id="select-dir" title="Text Direction">
+        <option value="ltr" $ltrSelected>LTR</option>
+        <option value="rtl" $rtlSelected>RTL</option>
       </select>
     </div>
 
     <!-- ==== EDITOR + SIDE PANEL ==== -->
     <div id="editor-wrapper">
       <div id="editor-main">
-        <div id="editor"></div>
-        <div id="fallback-container">
+        <!-- Loading Spinner -->
+        <div id="editor-loading" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:240px;color:#64748b;font-size:13px;gap:12px;">
+          <div style="width:28px;height:28px;border:3px solid #e2e8f0;border-top-color:#3b82f6;border-radius:50%;animation:spin 0.8s linear infinite;"></div>
+          <span>Loading editor controls...</span>
+          <button id="btn-force-fallback" onclick="initFallback()" style="display:none;padding:5px 12px;border:1px solid #cbd5e1;background:#fff;border-radius:6px;font-size:12px;color:#2563eb;cursor:pointer;font-weight:500;">Use Standard Editor</button>
+        </div>
+
+        <div id="editor" style="display:none;"></div>
+
+        <div id="fallback-container" style="display:none;">
           <div id="fallback-toolbar">
-            <select onchange="formatDoc('formatBlock', this.value)">
-              <option value="p">Paragraph</option><option value="h1">H1</option>
-              <option value="h2">H2</option><option value="h3">H3</option>
+            <select onchange="formatDoc('formatBlock', this.value)" title="Style">
+              <option value="p">Paragraph</option>
+              <option value="h1">Heading 1</option>
+              <option value="h2">Heading 2</option>
+              <option value="h3">Heading 3</option>
+              <option value="h4">Heading 4</option>
+              <option value="h5">Heading 5</option>
+              <option value="h6">Heading 6</option>
+              <option value="pre">Code Block</option>
+              <option value="blockquote">Quote</option>
             </select>
-            <button onclick="formatDoc('bold')"><b>B</b></button>
-            <button onclick="formatDoc('italic')"><i>I</i></button>
-            <button onclick="formatDoc('underline')"><u>U</u></button>
-            <button onclick="formatDoc('strikeThrough')"><s>S</s></button>
-            <button onclick="formatDoc('insertUnorderedList')">• List</button>
-            <button onclick="formatDoc('insertOrderedList')">1. List</button>
-            <button onclick="insertFallbackTable()">📊 Table</button>
+            <select onchange="formatDoc('fontName', this.value)" title="Font Family">
+              <option value="Arial, sans-serif">Arial</option>
+              <option value="Calibri, sans-serif">Calibri</option>
+              <option value="'Segoe UI', sans-serif">Segoe UI</option>
+              <option value="'Times New Roman', serif">Times New Roman</option>
+              <option value="Georgia, serif">Georgia</option>
+              <option value="Roboto, sans-serif">Roboto</option>
+              <option value="'Courier New', monospace">Courier New</option>
+            </select>
+            <select onchange="formatDoc('fontSize', this.value)" title="Font Size">
+              <option value="2">Small (10pt)</option>
+              <option value="3" selected>Normal (12pt)</option>
+              <option value="4">Medium (14pt)</option>
+              <option value="5">Large (18pt)</option>
+              <option value="6">Extra Large (24pt)</option>
+              <option value="7">Huge (36pt)</option>
+            </select>
+            <div class="fallback-sep"></div>
+            <button onclick="formatDoc('bold')" title="Bold"><b>B</b></button>
+            <button onclick="formatDoc('italic')" title="Italic"><i>I</i></button>
+            <button onclick="formatDoc('underline')" title="Underline"><u>U</u></button>
+            <button onclick="formatDoc('strikeThrough')" title="Strikethrough"><s>S</s></button>
+            <button onclick="formatDoc('subscript')" title="Subscript">X<sub>2</sub></button>
+            <button onclick="formatDoc('superscript')" title="Superscript">X<sup>2</sup></button>
+            <div class="fallback-sep"></div>
+            <label title="Text Color" style="display:inline-flex;align-items:center;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;background:#fff;font-size:12px;gap:4px;">
+              <span style="font-weight:bold;color:#2563eb;">A</span>
+              <input type="color" onchange="formatDoc('foreColor', this.value)" value="#000000" style="width:18px;height:18px;border:none;padding:0;background:none;cursor:pointer;">
+            </label>
+            <label title="Highlight Color" style="display:inline-flex;align-items:center;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;background:#fff;font-size:12px;gap:4px;">
+              <span style="background:#fef08a;padding:0 2px;font-weight:bold;">H</span>
+              <input type="color" onchange="formatDoc('hiliteColor', this.value)" value="#ffff00" style="width:18px;height:18px;border:none;padding:0;background:none;cursor:pointer;">
+            </label>
+            <div class="fallback-sep"></div>
+            <button onclick="formatDoc('justifyLeft')" title="Align Left">⇤</button>
+            <button onclick="formatDoc('justifyCenter')" title="Align Center">⇥⇤</button>
+            <button onclick="formatDoc('justifyRight')" title="Align Right">⇥</button>
+            <button onclick="formatDoc('justifyFull')" title="Justify">≡</button>
+            <div class="fallback-sep"></div>
+            <button onclick="formatDoc('insertUnorderedList')" title="Bulleted List">• List</button>
+            <button onclick="formatDoc('insertOrderedList')" title="Numbered List">1. List</button>
+            <button onclick="formatDoc('outdent')" title="Outdent">← Out</button>
+            <button onclick="formatDoc('indent')" title="Indent">In →</button>
+            <div class="fallback-sep"></div>
+            <button onclick="insertFallbackTable()" title="Insert Table">📊 Table</button>
+            <button onclick="insertFallbackLink()" title="Insert Link">🔗 Link</button>
+            <button onclick="insertFallbackHorizontalRule()" title="Horizontal Line">― Line</button>
+            <button onclick="formatDoc('removeFormat')" title="Clear Formatting">🧹 Clear</button>
+            <div class="fallback-sep"></div>
+            <button onclick="toggleDirectVoiceInput()" id="fallback-btn-voice" title="Voice to Text (Dictate)" style="color:#dc2626;font-weight:600;">🎙️ Voice</button>
+            <div class="fallback-sep"></div>
+            <button onclick="formatDoc('undo')" title="Undo">↺</button>
+            <button onclick="formatDoc('redo')" title="Redo">↻</button>
           </div>
           <div id="fallback-content" contenteditable="true"></div>
         </div>
@@ -1456,6 +2321,43 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       <div class="status-section">
         <span id="track-status">Track Changes: Off</span>
         <span class="page-indicator" id="page-indicator">Page 1</span>
+      </div>
+    </div>
+  <!-- ==== AI GENERATE & VOICE MODAL ==== -->
+  <div class="modal-overlay" id="ai-prompt-modal">
+    <div class="modal-box" style="max-width:580px;box-shadow:0 20px 40px rgba(0,0,0,0.3);border-radius:14px;">
+      <button class="close-modal" onclick="closeAiPromptModal()">&times;</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span style="font-size:22px;">✨</span>
+        <h2 style="margin:0;font-size:18px;color:#1e293b;">Generate with AI</h2>
+      </div>
+      <p style="margin-bottom:14px;color:#64748b;font-size:13px;line-height:1.4;">Type your prompt or click the microphone to speak. You can edit the text before sending to the API.</p>
+      
+      <!-- Input container with embedded mic button -->
+      <div style="position:relative;margin-bottom:12px;">
+        <textarea id="ai-prompt-input" rows="5" placeholder="Type prompt here, or click mic to speak (e.g. Generate a summary table with 5 sample items)..." style="width:100%;padding:12px 50px 12px 14px;border:1px solid #cbd5e1;border-radius:10px;font-size:14px;font-family:inherit;box-sizing:border-box;resize:vertical;min-height:110px;line-height:1.5;outline:none;" oninput="updateAiModalState()"></textarea>
+        <button type="button" id="ai-prompt-mic-btn" onclick="toggleAiPromptMic()" title="Tap to speak into text box" style="position:absolute;right:10px;bottom:14px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:50%;width:36px;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:17px;box-shadow:0 2px 5px rgba(0,0,0,0.06);transition:all 0.2s;">🎤</button>
+      </div>
+
+      <!-- Live Mic Recording Indicator Banner -->
+      <div id="ai-mic-status" style="display:none;align-items:center;gap:10px;background:#fef2f2;border:1px solid #fecaca;padding:9px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;color:#b91c1c;">
+        <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;animation:pulse 1s infinite;"></span>
+        <span id="ai-mic-status-text" style="flex:1;font-weight:500;">Listening… speak now. Words will appear in the box above.</span>
+        <button type="button" onclick="stopAiPromptMic()" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;">Stop Mic</button>
+      </div>
+
+      <!-- Error banner if API or Speech fails -->
+      <div id="ai-error-banner" style="display:none;background:#fef2f2;border:1px solid #fecaca;padding:8px 12px;border-radius:8px;margin-bottom:12px;font-size:13px;color:#dc2626;"></div>
+
+      <div class="modal-actions" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;">
+        <button type="button" onclick="clearAiPromptInput()" style="background:transparent;border:none;color:#64748b;cursor:pointer;font-size:13px;text-decoration:underline;">Clear text</button>
+        <div style="display:flex;gap:10px;">
+          <button type="button" onclick="closeAiPromptModal()" style="padding:9px 16px;border-radius:8px;border:1px solid #cbd5e1;background:#fff;cursor:pointer;font-size:13px;">Cancel</button>
+          <button type="button" class="primary-btn" id="btn-call-api" onclick="submitAiPromptToApi()" style="padding:9px 20px;border-radius:8px;background:#7c3aed;color:#fff;font-weight:600;border:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:13px;box-shadow:0 2px 6px rgba(124,58,237,0.3);">
+            <span id="btn-call-api-spinner" style="display:none;width:14px;height:14px;border:2px solid #ffffff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            <span id="btn-call-api-text">✨ Generate</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1497,29 +2399,60 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
   <!-- ==== FORMULA HELP & EDITOR MODAL ==== -->
   <div class="modal-overlay" id="formula-modal">
-    <div class="modal-box" style="max-width:580px;max-height:min(90vh,90dvh);overflow-y:auto;">
+    <div class="modal-box" style="max-width:580px;max-height:min(90vh,90dvh);overflow-y:auto;padding:18px 22px;">
       <button class="close-modal" onclick="closeFormulaHelpModal()">&times;</button>
-      <h2 id="formula-modal-title">🧮 Table Formula Editor</h2>
+      <h2 id="formula-modal-title" style="margin:0 0 12px 0;font-size:17px;display:flex;align-items:center;gap:8px;">🧮 Table Formula Editor</h2>
       
       <!-- Interactive Cell Formula Editor -->
-      <div id="formula-editor-section" style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:12px;margin-bottom:14px;">
+      <div id="formula-editor-section" style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:10px;padding:14px;margin-bottom:14px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-          <span style="font-weight:600;color:#1e40af;font-size:13px;" id="formula-cell-coord">📍 Target Cell: None selected</span>
-          <span style="font-size:11px;color:#64748b;">Must start with <code>=</code></span>
+          <span style="font-weight:700;color:#1e40af;font-size:13px;display:flex;align-items:center;gap:6px;" id="formula-cell-coord">📍 Target Cell: None selected</span>
+          <span style="font-size:11px;color:#2563eb;background:#dbeafe;padding:2px 8px;border-radius:12px;font-weight:600;">⚡ Auto-Calculates Live</span>
         </div>
         <div style="display:flex;gap:8px;margin-bottom:8px;">
-          <input type="text" id="formula-editor-input" placeholder="e.g. =SUM(ABOVE) or =A1+A2" style="flex:1;padding:8px 10px;border:1px solid #93c5fd;border-radius:6px;font-family:monospace;font-size:13px;outline:none;" onkeydown="if(event.key==='Enter')applyCurrentCellFormula();">
-          <button onclick="applyCurrentCellFormula()" class="primary-btn" style="padding:6px 14px;font-size:12px;background:#2563eb;color:white;border-radius:6px;border:none;cursor:pointer;font-weight:600;">Apply</button>
-          <button onclick="clearCurrentCellFormula()" style="padding:6px 10px;font-size:12px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-weight:500;" title="Remove formula and make cell normal static number">Clear</button>
+          <input type="text" id="formula-editor-input" placeholder="e.g. =SUM(A1+A2) or =A1*B1" style="flex:1;padding:9px 12px;border:1.5px solid #93c5fd;border-radius:6px;font-family:monospace;font-size:13.5px;outline:none;" oninput="updateFormulaLivePreview()" onkeydown="if(event.key==='Enter')applyCurrentCellFormula();">
+          <button id="formula-apply-btn" onclick="applyCurrentCellFormula()" class="primary-btn" style="padding:7px 16px;font-size:13px;background:#2563eb;color:white;border-radius:6px;border:none;cursor:pointer;font-weight:600;box-shadow:0 1px 2px rgba(37,99,235,0.2);">Apply</button>
+          <button id="formula-clear-btn" onclick="clearCurrentCellFormula()" style="padding:7px 12px;font-size:13px;background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;border-radius:6px;cursor:pointer;font-weight:500;" title="Remove or clear formula">Clear</button>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
-          <span style="font-size:11px;color:#475569;font-weight:500;margin-right:2px;">Quick:</span>
-          <button type="button" onclick="setFormulaInput('=SUM(ABOVE)')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=SUM(ABOVE)</button>
-          <button type="button" onclick="setFormulaInput('=AVG(ABOVE)')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=AVG(ABOVE)</button>
-          <button type="button" onclick="setFormulaInput('=COUNT(ABOVE)')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=COUNT(ABOVE)</button>
-          <button type="button" onclick="setFormulaInput('=A1+A2')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=A1+A2</button>
-          <button type="button" onclick="setFormulaInput('=A1*B1')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=A1*B1</button>
-          <button type="button" onclick="setFormulaInput('=MAX(ABOVE)')" style="font-size:11px;padding:2px 7px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#1e40af;font-weight:500;">=MAX(ABOVE)</button>
+
+        <!-- Live Calculation Preview -->
+        <div id="formula-preview-row" style="display:flex;align-items:center;justify-content:space-between;background:#ffffff;border:1px dashed #93c5fd;border-radius:6px;padding:6px 10px;margin-bottom:10px;">
+          <span style="font-size:12px;color:#475569;font-weight:500;">📊 Live Result Preview:</span>
+          <span id="formula-live-preview-val" style="font-size:13px;font-weight:700;font-family:monospace;color:#16a34a;">--</span>
+        </div>
+
+        <!-- Math Operator & Function Buttons -->
+        <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-bottom:8px;">
+          <span style="font-size:11px;color:#475569;font-weight:600;">Operators:</span>
+          <button type="button" onclick="insertFormulaToken('+')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">+</button>
+          <button type="button" onclick="insertFormulaToken('-')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">-</button>
+          <button type="button" onclick="insertFormulaToken('*')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">&times;</button>
+          <button type="button" onclick="insertFormulaToken('/')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">&divide;</button>
+          <button type="button" onclick="insertFormulaToken('(')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">(</button>
+          <button type="button" onclick="insertFormulaToken(')')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">)</button>
+          <button type="button" onclick="insertFormulaToken(', ')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">,</button>
+          <button type="button" onclick="insertFormulaToken(':')" style="padding:3px 9px;font-size:12px;background:#ffffff;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;font-weight:700;color:#1e293b;">:</button>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+          <span style="font-size:11px;color:#475569;font-weight:600;">Functions:</span>
+          <button type="button" onclick="wrapOrSetFormulaFunction('SUM')" style="font-size:11px;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1d4ed8;font-weight:600;">SUM(&hellip;)</button>
+          <button type="button" onclick="wrapOrSetFormulaFunction('AVG')" style="font-size:11px;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1d4ed8;font-weight:600;">AVG(&hellip;)</button>
+          <button type="button" onclick="wrapOrSetFormulaFunction('COUNT')" style="font-size:11px;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1d4ed8;font-weight:600;">COUNT(&hellip;)</button>
+          <button type="button" onclick="wrapOrSetFormulaFunction('MAX')" style="font-size:11px;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1d4ed8;font-weight:600;">MAX(&hellip;)</button>
+          <button type="button" onclick="wrapOrSetFormulaFunction('MIN')" style="font-size:11px;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;cursor:pointer;color:#1d4ed8;font-weight:600;">MIN(&hellip;)</button>
+          <button type="button" onclick="setFormulaInput('=SUM(ABOVE)')" style="font-size:11px;padding:3px 8px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:4px;cursor:pointer;color:#475569;font-weight:500;">=SUM(ABOVE)</button>
+        </div>
+      </div>
+
+      <!-- Interactive Table Cells Grid: Click cell to insert into formula -->
+      <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <span style="font-weight:600;color:#0f172a;font-size:12.5px;">📍 Click Table Cells to Add to Formula:</span>
+          <span style="font-size:11px;color:#64748b;">Click cell to insert coordinate</span>
+        </div>
+        <div id="formula-cells-picker-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(110px, 1fr));gap:6px;max-height:160px;overflow-y:auto;padding:2px;">
+          <!-- Dynamically populated -->
         </div>
       </div>
       
@@ -1591,18 +2524,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       <div>
         <label style="font-weight:600;font-size:11.5px;display:block;margin-bottom:5px;color:#334155;">2. Select Background Color:</label>
         <div class="color-swatch-grid" style="display:grid;grid-template-columns:repeat(auto-fill, minmax(36px, 1fr));gap:5px;">
-          <button type="button" class="color-swatch" style="height:26px;background:#ffffff;border:1px solid #cbd5e1;" title="Clear / White" onclick="applyPresetBg('#ffffff', '#1e293b')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#eff6ff;border:1px solid #bfdbfe;" title="Soft Blue" onclick="applyPresetBg('#eff6ff', '#1e40af')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#f0fdf4;border:1px solid #bbf7d0;" title="Soft Green" onclick="applyPresetBg('#f0fdf4', '#166534')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#fefce8;border:1px solid #fef08a;" title="Soft Yellow" onclick="applyPresetBg('#fefce8', '#854d0e')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#faf5ff;border:1px solid #e9d5ff;" title="Soft Purple" onclick="applyPresetBg('#faf5ff', '#6b21a8')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#fef2f2;border:1px solid #fecaca;" title="Soft Red" onclick="applyPresetBg('#fef2f2', '#991b1b')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#f1f5f9;border:1px solid #cbd5e1;" title="Slate Gray" onclick="applyPresetBg('#f1f5f9', '#0f172a')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#e0e7ff;border:1px solid #c7d2fe;" title="Indigo Light" onclick="applyPresetBg('#e0e7ff', '#3730a3')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#ccfbf1;border:1px solid #99f6e4;" title="Teal Light" onclick="applyPresetBg('#ccfbf1', '#115e59')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#ffedd5;border:1px solid #fed7aa;" title="Orange Light" onclick="applyPresetBg('#ffedd5', '#9a3412')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#2563eb;border:1px solid #1d4ed8;" title="Royal Blue" onclick="applyPresetBg('#2563eb', '#ffffff')"></button>
-          <button type="button" class="color-swatch" style="height:26px;background:#1e293b;border:1px solid #0f172a;" title="Dark Slate" onclick="applyPresetBg('#1e293b', '#ffffff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#ffffff;border:1px solid #cbd5e1;" title="Clear / White" onclick="applyPresetBg('#ffffff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#eff6ff;border:1px solid #bfdbfe;" title="Soft Blue" onclick="applyPresetBg('#eff6ff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#f0fdf4;border:1px solid #bbf7d0;" title="Soft Green" onclick="applyPresetBg('#f0fdf4')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#fefce8;border:1px solid #fef08a;" title="Soft Yellow" onclick="applyPresetBg('#fefce8')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#faf5ff;border:1px solid #e9d5ff;" title="Soft Purple" onclick="applyPresetBg('#faf5ff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#fef2f2;border:1px solid #fecaca;" title="Soft Red" onclick="applyPresetBg('#fef2f2')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#f1f5f9;border:1px solid #cbd5e1;" title="Slate Gray" onclick="applyPresetBg('#f1f5f9')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#e0e7ff;border:1px solid #c7d2fe;" title="Indigo Light" onclick="applyPresetBg('#e0e7ff')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#ccfbf1;border:1px solid #99f6e4;" title="Teal Light" onclick="applyPresetBg('#ccfbf1')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#ffedd5;border:1px solid #fed7aa;" title="Orange Light" onclick="applyPresetBg('#ffedd5')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#2563eb;border:1px solid #1d4ed8;" title="Royal Blue" onclick="applyPresetBg('#2563eb')"></button>
+          <button type="button" class="color-swatch" style="height:26px;background:#1e293b;border:1px solid #0f172a;" title="Dark Slate" onclick="applyPresetBg('#1e293b')"></button>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
           <label style="font-size:11.5px;color:#475569;font-weight:500;">Custom:</label>
@@ -1648,6 +2581,35 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       <div class="modal-actions" style="margin-top:4px;padding-top:8px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
         <button type="button" onclick="harmonizeActiveTable()" style="padding:5px 10px;background:#f0fdf4;color:#166534;border:1px solid #86efac;border-radius:6px;font-size:11.5px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:4px;">🧹 Harmonize Table</button>
         <button class="primary-btn" onclick="closeTableColorModal()" style="padding:5px 16px;font-size:12px;">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==== TABLE CELL REFERENCE PICKER MODAL ==== -->
+  <div class="modal-overlay" id="cell-ref-modal">
+    <div class="modal-box" style="max-width:680px;width:95%;">
+      <button class="close-modal" onclick="closeCellRefModal()">&times;</button>
+      <h2 style="display:flex;align-items:center;gap:8px;">🔗 Reference Table Cell in Text</h2>
+      <p style="margin-bottom:12px;color:#64748b;font-size:12.5px;">Click any cell from your document's tables below or type coordinate (e.g. <strong>\$A1</strong>) to insert a live reactive reference.</p>
+
+      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+        <input type="text" id="cell-ref-search" placeholder="🔍 Search cell value, header, or coordinate (e.g. A1, Team A)..." 
+               style="flex:1;padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;outline:none;"
+               oninput="renderCellRefPickerGrid()">
+        <select id="cell-ref-table-select" style="padding:8px 12px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;"
+                onchange="renderCellRefPickerGrid()">
+        </select>
+      </div>
+
+      <!-- Live interactive table cell grid -->
+      <div id="cell-ref-grid-container" style="max-height:280px;overflow:auto;border:1px solid #cbd5e1;border-radius:8px;padding:8px;background:#f8fafc;">
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:10px;border-top:1px solid #e2e8f0;">
+        <span style="font-size:12px;color:#64748b;">
+          💡 Pro-tip: You can also type <strong>\$</strong> anywhere to open auto-complete, or type <strong>\$A1</strong> directly!
+        </span>
+        <button class="primary-btn" onclick="closeCellRefModal()" style="padding:6px 16px;font-size:12px;">Close</button>
       </div>
     </div>
   </div>
@@ -1705,7 +2667,409 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     </div>
   </div>
 
+  <!-- Floating Voice Input Transcription Bar -->
+  <div id="voice-live-bar" style="display:none;flex-direction:column;position:fixed;bottom:24px;left:50%;transform:translateX(-50%);width:min(640px, calc(100vw - 32px));box-sizing:border-box;background:#0f172a;color:#f8fafc;padding:10px 14px;border-radius:16px;box-shadow:0 12px 30px rgba(0,0,0,0.35);z-index:999999;gap:8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:13px;border:1px solid #334155;">
+    <div id="voice-live-text" style="max-height:min(40vh, 220px);overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;font-weight:500;"><span id="voice-live-final"></span><span id="voice-live-interim" style="color:#94a3b8;">Listening… Speak into microphone</span></div>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:50%;box-shadow:0 0 8px #ef4444;animation:voicePulse 1.2s infinite;"></span>
+      <span id="voice-live-count" style="flex:1;font-size:11px;color:#94a3b8;">Listening…</span>
+      <button type="button" onclick="stopDirectVoiceInput(true)" style="background:#10b981;color:white;border:none;border-radius:14px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer;line-height:1.2;display:inline-flex;align-items:center;gap:3px;" title="Insert transcribed text into editor">✓ Insert</button>
+      <button type="button" onclick="sendVoiceToAiModal()" style="background:#7c3aed;color:white;border:none;border-radius:14px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer;line-height:1.2;display:inline-flex;align-items:center;gap:3px;" title="Send spoken text to AI Generate">✨ AI</button>
+      <button type="button" onclick="stopDirectVoiceInput(false)" style="background:#334155;color:#94a3b8;border:none;border-radius:14px;padding:4px 8px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2;" title="Cancel">✕</button>
+    </div>
+  </div>
+
   <script>
+    /* ====== AI PROMPT & SPEECH RECOGNITION (GENERATE MODAL) ====== */
+    let aiSpeechRec = null;
+    let isAiListening = false;
+    let aiPromptPreSpeech = '';
+    let aiPromptAccumulated = '';
+
+    function openAiPromptModal() {
+      const modal = document.getElementById('ai-prompt-modal');
+      const input = document.getElementById('ai-prompt-input');
+      const errBanner = document.getElementById('ai-error-banner');
+      if (errBanner) {
+        errBanner.textContent = '';
+        errBanner.style.display = 'none';
+      }
+      resetAiApiButton();
+      if (modal) modal.classList.add('show');
+      if (input) {
+        setTimeout(function() { input.focus(); }, 120);
+      }
+    }
+
+    function closeAiPromptModal() {
+      stopAiPromptMic();
+      const modal = document.getElementById('ai-prompt-modal');
+      if (modal) modal.classList.remove('show');
+    }
+
+    function clearAiPromptInput() {
+      const input = document.getElementById('ai-prompt-input');
+      if (input) {
+        input.value = '';
+        input.focus();
+      }
+      updateAiModalState();
+    }
+
+    function updateAiModalState() {
+      const errBanner = document.getElementById('ai-error-banner');
+      if (errBanner && errBanner.style.display !== 'none') {
+        errBanner.style.display = 'none';
+      }
+    }
+
+    function toggleAiPromptMic() {
+      if (isAiListening) {
+        stopAiPromptMic();
+      } else {
+        startAiPromptMic();
+      }
+    }
+
+    function startAiPromptMic() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        alert('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+        return;
+      }
+
+      const input = document.getElementById('ai-prompt-input');
+      aiPromptPreSpeech = (input ? input.value : '');
+      if (aiPromptPreSpeech.length > 0 && !aiPromptPreSpeech.endsWith(' ') && !aiPromptPreSpeech.endsWith('\\n')) {
+        aiPromptPreSpeech += ' ';
+      }
+      aiPromptAccumulated = '';
+
+      try {
+        aiSpeechRec = new SpeechRec();
+        aiSpeechRec.continuous = true;
+        aiSpeechRec.interimResults = true;
+        const dirEl = document.getElementById('select-dir');
+        aiSpeechRec.lang = (dirEl && dirEl.value === 'rtl') ? 'ar-SA' : 'en-US';
+
+        const micBtn = document.getElementById('ai-prompt-mic-btn');
+        if (micBtn) {
+          micBtn.style.background = '#dc2626';
+          micBtn.style.color = '#ffffff';
+          micBtn.style.borderColor = '#b91c1c';
+          micBtn.innerHTML = '⏹️';
+        }
+        isAiListening = true;
+
+        const micStatus = document.getElementById('ai-mic-status');
+        const micStatusText = document.getElementById('ai-mic-status-text');
+        if (micStatus) micStatus.style.display = 'flex';
+        if (micStatusText) micStatusText.textContent = 'Listening… speak now. Words will appear in the box.';
+
+        aiSpeechRec.onresult = function(event) {
+          let interim = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              aiPromptAccumulated += event.results[i][0].transcript + ' ';
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          if (input) {
+            input.value = aiPromptPreSpeech + aiPromptAccumulated + interim;
+            input.scrollTop = input.scrollHeight;
+          }
+        };
+
+        aiSpeechRec.onerror = function(event) {
+          console.warn('AI speech error:', event.error);
+          if (event.error === 'not-allowed') {
+            alert('Microphone access was denied. Please allow microphone permission in your browser address bar.');
+          }
+          stopAiPromptMic();
+        };
+
+        aiSpeechRec.onend = function() {
+          if (isAiListening) {
+            stopAiPromptMic();
+          }
+        };
+
+        aiSpeechRec.start();
+      } catch (err) {
+        console.error('Failed to start speech recognition:', err);
+        stopAiPromptMic();
+      }
+    }
+
+    function stopAiPromptMic() {
+      isAiListening = false;
+      if (aiSpeechRec) {
+        try { aiSpeechRec.stop(); } catch(_) {}
+        aiSpeechRec = null;
+      }
+
+      const micBtn = document.getElementById('ai-prompt-mic-btn');
+      if (micBtn) {
+        micBtn.style.background = '#f8fafc';
+        micBtn.style.color = 'inherit';
+        micBtn.style.borderColor = '#cbd5e1';
+        micBtn.innerHTML = '🎤';
+      }
+
+      const micStatus = document.getElementById('ai-mic-status');
+      if (micStatus) micStatus.style.display = 'none';
+
+      const input = document.getElementById('ai-prompt-input');
+      if (input) {
+        input.value = input.value.trim();
+        input.focus();
+      }
+    }
+
+    function resetAiApiButton() {
+      const btn = document.getElementById('btn-call-api');
+      const spinner = document.getElementById('btn-call-api-spinner');
+      const text = document.getElementById('btn-call-api-text');
+      if (btn) btn.disabled = false;
+      if (spinner) spinner.style.display = 'none';
+      if (text) text.textContent = '✨ Generate';
+    }
+
+    function submitAiPromptToApi() {
+      stopAiPromptMic();
+      const input = document.getElementById('ai-prompt-input');
+      const promptText = (input ? input.value : '').trim();
+
+      if (!promptText) {
+        const errBanner = document.getElementById('ai-error-banner');
+        if (errBanner) {
+          errBanner.textContent = 'Please type your instruction or click the mic to speak first.';
+          errBanner.style.display = 'block';
+        }
+        if (input) input.focus();
+        return;
+      }
+
+      const btn = document.getElementById('btn-call-api');
+      const spinner = document.getElementById('btn-call-api-spinner');
+      const text = document.getElementById('btn-call-api-text');
+      if (btn) btn.disabled = true;
+      if (spinner) spinner.style.display = 'inline-block';
+      if (text) text.textContent = 'Calling API…';
+
+      // Send the reviewed/edited prompt text to Flutter / backend API
+      postToFlutter({ type: 'ai_generate_request', text: promptText });
+    }
+
+    // Compatibility alias
+    function toggleVoiceInput() {
+      openAiPromptModal();
+    }
+
+    /* ====== DIRECT VOICE-TO-TEXT INPUT (DICTATION) ====== */
+    let directVoiceRec = null;
+    let isDirectVoiceListening = false;
+    let directVoiceFinalText = '';
+    let directVoiceInterimText = '';
+    let directVoiceRestarts = 0;
+
+    /* Shows the whole transcript live (final text + greyed interim words), scrolled to the newest words */
+    function renderVoiceLiveText() {
+      const finalEl = document.getElementById('voice-live-final');
+      const interimEl = document.getElementById('voice-live-interim');
+      const box = document.getElementById('voice-live-text');
+      const countEl = document.getElementById('voice-live-count');
+      const finalText = directVoiceFinalText.trim();
+      const interim = directVoiceInterimText.trim();
+      if (finalEl) finalEl.textContent = finalText;
+      if (interimEl) {
+        interimEl.textContent = (finalText && interim ? ' ' : '') + interim;
+        if (!finalText && !interim) interimEl.textContent = 'Listening… Speak into microphone';
+      }
+      if (countEl) {
+        const words = (finalText + ' ' + interim).trim().split(/ +/).filter(Boolean).length;
+        countEl.textContent = words ? 'Listening… ' + words + (words === 1 ? ' word' : ' words') : 'Listening…';
+      }
+      if (box) box.scrollTop = box.scrollHeight;
+    }
+
+    function toggleDirectVoiceInput() {
+      if (isDirectVoiceListening) {
+        stopDirectVoiceInput(true);
+      } else {
+        startDirectVoiceInput();
+      }
+    }
+    window.toggleDirectVoiceInput = toggleDirectVoiceInput;
+
+    function startDirectVoiceInput() {
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        alert('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+        return;
+      }
+
+      if (isAiListening) stopAiPromptMic();
+
+      directVoiceFinalText = '';
+      directVoiceInterimText = '';
+      directVoiceRestarts = 0;
+
+      try {
+        directVoiceRec = new SpeechRec();
+        directVoiceRec.continuous = true;
+        directVoiceRec.interimResults = true;
+        const dirEl = document.getElementById('select-dir');
+        directVoiceRec.lang = (dirEl && dirEl.value === 'rtl') ? 'ar-SA' : 'en-US';
+
+        const btn = document.getElementById('btn-voice-to-text');
+        const icon = document.getElementById('btn-voice-icon');
+        const label = document.getElementById('btn-voice-label');
+        if (btn) btn.classList.add('listening');
+        if (icon) icon.textContent = '⏹️';
+        if (label) label.textContent = 'Stop Voice';
+        if (btn) btn.title = 'Stop dictation and insert the text';
+
+        const fallbackBtn = document.getElementById('fallback-btn-voice');
+        if (fallbackBtn) {
+          fallbackBtn.style.color = '#dc2626';
+          fallbackBtn.textContent = '⏹️ Stop';
+        }
+
+        const bar = document.getElementById('voice-live-bar');
+        if (bar) bar.style.display = 'flex';
+        renderVoiceLiveText();
+
+        isDirectVoiceListening = true;
+
+        directVoiceRec.onresult = function(event) {
+          let interim = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              directVoiceFinalText += event.results[i][0].transcript + ' ';
+            } else {
+              interim += event.results[i][0].transcript;
+            }
+          }
+          directVoiceInterimText = interim;
+          directVoiceRestarts = 0;
+          renderVoiceLiveText();
+        };
+
+        directVoiceRec.onerror = function(event) {
+          console.warn('Direct voice error:', event.error);
+          if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            alert('Microphone access was denied. Please allow microphone permission in your browser address bar.');
+            stopDirectVoiceInput(false);
+          }
+          /* Other errors (no-speech, network, ...) end the session; onend restarts it and keeps the text */
+        };
+
+        directVoiceRec.onend = function() {
+          if (!isDirectVoiceListening) return;
+          /* Browsers end a "continuous" session after silence or ~1 min; keep dictating until the user stops */
+          if (directVoiceInterimText) {
+            directVoiceFinalText += directVoiceInterimText + ' ';
+            directVoiceInterimText = '';
+          }
+          if (directVoiceRestarts < 5) {
+            directVoiceRestarts++;
+            try { directVoiceRec.start(); return; } catch (_) {}
+          }
+          stopDirectVoiceInput(true);
+        };
+
+        directVoiceRec.start();
+        showToastMsg('🎙️ Listening… Speak into microphone');
+      } catch (err) {
+        console.error('Failed to start direct voice recognition:', err);
+        stopDirectVoiceInput(false);
+      }
+    }
+    window.startDirectVoiceInput = startDirectVoiceInput;
+
+    function stopDirectVoiceInput(insert) {
+      if (insert === undefined) insert = true;
+      const wasListening = isDirectVoiceListening;
+      isDirectVoiceListening = false;
+
+      if (directVoiceRec) {
+        try { directVoiceRec.stop(); } catch(_) {}
+        directVoiceRec = null;
+      }
+
+      const btn = document.getElementById('btn-voice-to-text');
+      const icon = document.getElementById('btn-voice-icon');
+      const label = document.getElementById('btn-voice-label');
+      if (btn) btn.classList.remove('listening');
+      if (icon) icon.textContent = '🎙️';
+      if (label) label.textContent = 'Voice to Text';
+      if (btn) btn.title = 'Voice to Text — Dictate speech directly into document';
+
+      const fallbackBtn = document.getElementById('fallback-btn-voice');
+      if (fallbackBtn) {
+        fallbackBtn.style.color = '#dc2626';
+        fallbackBtn.textContent = '🎙️ Voice';
+      }
+
+      const bar = document.getElementById('voice-live-bar');
+      if (bar) bar.style.display = 'none';
+
+      if (insert && wasListening) {
+        const fullText = (directVoiceFinalText + ' ' + directVoiceInterimText).trim();
+        if (fullText) {
+          insertDirectVoiceText(fullText);
+        }
+      }
+    }
+    window.stopDirectVoiceInput = stopDirectVoiceInput;
+
+    function stopVoiceInput() {
+      stopDirectVoiceInput(true);
+    }
+    window.stopVoiceInput = stopVoiceInput;
+
+    function insertDirectVoiceText(text) {
+      if (!text) return;
+      if (editorInstance) {
+        try {
+          editorInstance.model.change(writer => {
+            const sel = editorInstance.model.document.selection;
+            writer.insertText(text + ' ', sel.getFirstPosition());
+          });
+          editorInstance.editing.view.focus();
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+          showToastMsg('✓ Voice inserted: "' + (text.length > 28 ? text.slice(0, 28) + '…' : text) + '"');
+        } catch (e) {
+          console.warn('insertDirectVoiceText error:', e);
+          insertSlashHtml('<span>' + escapeHtml(text) + ' </span>');
+        }
+      } else if (isFallback) {
+        const fc = document.getElementById('fallback-content');
+        if (fc) {
+          fc.focus();
+          document.execCommand('insertText', false, text + ' ');
+          updateFallbackStats();
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+          showToastMsg('✓ Voice inserted');
+        }
+      }
+    }
+    window.insertDirectVoiceText = insertDirectVoiceText;
+
+    function sendVoiceToAiModal() {
+      const fullText = (directVoiceFinalText + ' ' + directVoiceInterimText).trim();
+      stopDirectVoiceInput(false);
+      openAiPromptModal();
+      const input = document.getElementById('ai-prompt-input');
+      if (input && fullText) {
+        input.value = fullText;
+        updateAiModalState();
+      }
+    }
+    window.sendVoiceToAiModal = sendVoiceToAiModal;
+
     function toggleFullscreen() {
       const container = document.getElementById('app-container');
       const btn = document.getElementById('btn-fullscreen');
@@ -1759,6 +3123,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     const EDITOR_ID = $editorIdJson;
     let initialContent = $initialJson;
     const placeholderText = $placeholderJson;
+    let currentTextDir = '$initialDir';
     let editorInstance = null;
     let isFallback = false;
     let scriptLoaded = false;
@@ -1778,31 +3143,96 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       window.parent.postMessage(JSON.stringify(msg), '*');
     }
 
-    /* ====== CKEDITOR 5 INIT ====== */
-    function onScriptLoaded() {
-      scriptLoaded = true;
-      initCKEditor();
+    /* ====== ASYNC SCRIPT LOADER ====== */
+    function loadExternalScript(src, timeoutMs = 1500) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.async = true;
+        let done = false;
+        const timer = setTimeout(() => {
+          if (!done) {
+            done = true;
+            try { s.remove(); } catch(e) {}
+            reject(new Error('Timeout loading ' + src));
+          }
+        }, timeoutMs);
+        s.onload = () => {
+          if (!done) {
+            done = true;
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+        s.onerror = (e) => {
+          if (!done) {
+            done = true;
+            clearTimeout(timer);
+            try { s.remove(); } catch(err) {}
+            reject(new Error('Failed to load ' + src));
+          }
+        };
+        document.head.appendChild(s);
+      });
     }
 
-    /* Dynamically load CKEditor script so onScriptLoaded is always defined first */
-    (function loadCKEditorScript() {
-      var s = document.createElement('script');
-      s.src = 'https://cdn.ckeditor.com/ckeditor5/41.4.2/super-build/ckeditor.js';
-      s.onload = function() { onScriptLoaded(); };
-      s.onerror = function() { initFallback(); };
-      document.head.appendChild(s);
-    })();
+    /* ====== CKEDITOR 5 INIT ====== */
+    function checkAndInitCKEditor() {
+      // 1. If CKEditor is already loaded
+      if (typeof CKEDITOR !== 'undefined' && CKEDITOR.ClassicEditor) {
+        scriptLoaded = true;
+        initCKEditor();
+        return;
+      }
 
-    setTimeout(() => {
-      if (!editorInstance && !isFallback) initFallback();
-    }, 8000);
+      // Show manual fallback button after 600ms if network is slow
+      setTimeout(() => {
+        const btn = document.getElementById('btn-force-fallback');
+        if (btn && !editorInstance && !isFallback) {
+          btn.style.display = 'inline-block';
+        }
+      }, 600);
+
+      // Load CKEditor Super Build dynamically with strict 1500ms timeout
+      loadExternalScript('https://cdn.ckeditor.com/ckeditor5/41.4.2/super-build/ckeditor.js', 1500)
+        .then(() => {
+          if (typeof CKEDITOR !== 'undefined' && CKEDITOR.ClassicEditor) {
+            scriptLoaded = true;
+            initCKEditor();
+          } else {
+            console.warn('CKEditor object missing after script load, switching to fallback');
+            initFallback();
+          }
+        })
+        .catch(err => {
+          console.warn('CKEditor CDN load failed or timed out (1.5s), switching to fallback:', err);
+          initFallback();
+        });
+
+      // Background load KaTeX for math equations (non-blocking)
+      loadExternalScript('https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js', 6000)
+        .catch(() => {});
+    }
+
+    // Call immediately without waiting for DOMContentLoaded
+    checkAndInitCKEditor();
 
     function initCKEditor() {
-      if (typeof CKEDITOR === 'undefined') { initFallback(); return; }
+      if (editorInstance || isFallback) return;
+      if (typeof CKEDITOR === 'undefined' || !CKEDITOR.ClassicEditor) {
+        initFallback();
+        return;
+      }
+      const editorEl = document.querySelector('#editor');
+      if (!editorEl) {
+        initFallback();
+        return;
+      }
+      editorEl.style.display = 'block';
 
       try {
-        CKEDITOR.ClassicEditor
-          .create(document.querySelector('#editor'), {
+        const createPromise = CKEDITOR.ClassicEditor
+          .create(editorEl, {
           toolbar: {
             items: [
               'undo', 'redo', '|',
@@ -1819,8 +3249,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               'htmlEmbed', '|',
               'specialCharacters', 'pageBreak', '|',
               'findAndReplace', 'selectAll', '|',
-              'sourceEditing', 'showBlocks', '|',
-              'textPartLanguage', 'accessibilityHelp'
+              'showBlocks'
             ],
             shouldNotGroupWhenFull: true
           },
@@ -1907,6 +3336,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                   '#lims', '#urgent', '#review', '#approved', '#pending', '#clinical', '#protocol', '#sample'
                 ],
                 minimumCharacters: 1
+              },
+              {
+                marker: '\$',
+                feed: getTableCellMentionsFeed,
+                minimumCharacters: 0,
+                itemRenderer: renderTableCellMentionItem
               }
             ]
           },
@@ -2041,42 +3476,284 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           },
           placeholder: placeholderText || 'Start typing...',
           language: 'en'
-        })
+        });
+
+        const timeoutPromise = new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('CKEditor creation timed out after 2500ms')), 2500);
+        });
+
+        Promise.race([createPromise, timeoutPromise])
         .then(editor => {
+          if (isFallback) {
+            try { editor.destroy(); } catch (e) {}
+            return;
+          }
           editorInstance = editor;
           window.editorInstance = editor;
 
-          /* Register dataFormula attribute on tableCell so CKEditor preserves it in model & view */
+          // Clear any loading indicator
+          const loadingEl = document.getElementById('editor-loading');
+          if (loadingEl) loadingEl.style.display = 'none';
+
+          /* Register dataFormula & dataFormulaVal attributes on tableCell and dir attribute on block */
           try {
-            editor.model.schema.extend('tableCell', { allowAttributes: ['dataFormula'] });
+            editor.model.schema.extend('tableCell', { allowAttributes: ['dataFormula', 'dataFormulaVal'] });
             editor.conversion.attributeToAttribute({
               model: 'dataFormula',
               view: 'data-formula'
             });
+            editor.conversion.attributeToAttribute({
+              model: 'dataFormulaVal',
+              view: 'data-formula-val'
+            });
+            editor.model.schema.extend('\$block', { allowAttributes: ['dir'] });
+            try {
+              editor.model.schema.setAttributeProperties('dir', { copyOnEnter: true });
+            } catch (propErr) {}
+            editor.conversion.attributeToAttribute({
+              model: 'dir',
+              view: 'dir'
+            });
+
+            /* Register tableCellRef attribute on \$text for permanent, live table cell reference pills */
+            editor.model.schema.extend('\$text', { allowAttributes: ['tableCellRef'] });
+            try {
+              editor.model.schema.setAttributeProperties('tableCellRef', { isFormatting: true, copyOnEnter: false });
+            } catch (tcrPropErr) {}
+
+            editor.conversion.for('downcast').attributeToElement({
+              model: 'tableCellRef',
+              view: (val, { writer }) => {
+                let coord = 'A1';
+                let tIdx = 0;
+                if (typeof val === 'string') {
+                  coord = val.toUpperCase();
+                } else if (val && typeof val === 'object') {
+                  coord = (val.coord || 'A1').toUpperCase();
+                  tIdx = val.tableIdx !== undefined ? val.tableIdx : 0;
+                }
+                const token = '\$' + (tIdx > 0 ? ('T' + (tIdx + 1) + ':' + coord) : coord);
+                return writer.createAttributeElement('span', {
+                  class: 'table-cell-ref mention',
+                  'data-cell-coord': coord,
+                  'data-table-idx': String(tIdx),
+                  'data-mention': token,
+                  title: 'Table cell ' + coord + ' (Live Link)'
+                }, { priority: 25 });
+              }
+            });
+
+            editor.conversion.for('upcast').elementToAttribute({
+              view: {
+                name: 'span',
+                classes: 'table-cell-ref'
+              },
+              model: {
+                key: 'tableCellRef',
+                value: viewElement => {
+                  let coord = viewElement.getAttribute('data-cell-coord');
+                  let tIdx = parseInt(viewElement.getAttribute('data-table-idx'), 10) || 0;
+                  if (!coord) {
+                    let m = viewElement.getAttribute('data-mention') || '';
+                    if (m.indexOf('\$') === 0) m = m.substring(1);
+                    if (m.toUpperCase().indexOf('T') === 0 && m.indexOf(':') !== -1) {
+                      const p = m.split(':');
+                      tIdx = parseInt(p[0].substring(1), 10) - 1 || 0;
+                      m = p[1];
+                    }
+                    coord = m.toUpperCase();
+                  }
+                  return { coord: coord || 'A1', tableIdx: tIdx };
+                }
+              }
+            });
+
+            editor.conversion.for('upcast').elementToAttribute({
+              view: {
+                name: 'span',
+                attributes: {
+                  'data-cell-coord': true
+                }
+              },
+              model: {
+                key: 'tableCellRef',
+                value: viewElement => {
+                  const coord = (viewElement.getAttribute('data-cell-coord') || 'A1').toUpperCase();
+                  const tIdx = parseInt(viewElement.getAttribute('data-table-idx'), 10) || 0;
+                  return { coord: coord, tableIdx: tIdx };
+                }
+              }
+            });
+
+            editor.conversion.for('upcast').elementToAttribute({
+              view: {
+                name: 'span',
+                attributes: {
+                  'data-mention': /^\\\$[A-Za-z0-9:]+\$/
+                }
+              },
+              model: {
+                key: 'tableCellRef',
+                value: viewElement => {
+                  let m = viewElement.getAttribute('data-mention') || '';
+                  let tIdx = parseInt(viewElement.getAttribute('data-table-idx'), 10) || 0;
+                  let coord = viewElement.getAttribute('data-cell-coord');
+                  if (!coord) {
+                    if (m.indexOf('\$') === 0) m = m.substring(1);
+                    if (m.toUpperCase().indexOf('T') === 0 && m.indexOf(':') !== -1) {
+                      const p = m.split(':');
+                      tIdx = parseInt(p[0].substring(1), 10) - 1 || 0;
+                      m = p[1];
+                    }
+                    coord = m.toUpperCase();
+                  }
+                  return { coord: coord || 'A1', tableIdx: tIdx };
+                }
+              }
+            });
+
+            /* Register inlineFormula attribute on \$text for live formula calculations in text outside tables */
+            editor.model.schema.extend('\$text', { allowAttributes: ['inlineFormula'] });
+            try {
+              editor.model.schema.setAttributeProperties('inlineFormula', { isFormatting: true, copyOnEnter: false });
+            } catch (infPropErr) {}
+
+            editor.conversion.for('downcast').attributeToElement({
+              model: 'inlineFormula',
+              view: (val, { writer }) => {
+                let formula = '=';
+                let tIdx = 0;
+                if (typeof val === 'string') {
+                  formula = val;
+                } else if (val && typeof val === 'object') {
+                  formula = val.formula || '=';
+                  tIdx = val.tableIdx !== undefined ? val.tableIdx : 0;
+                }
+                return writer.createAttributeElement('span', {
+                  class: 'inline-formula-pill',
+                  'data-formula': formula,
+                  'data-table-idx': String(tIdx),
+                  title: 'Formula: ' + formula + ' (Live Calculation - Click to edit)'
+                }, { priority: 25 });
+              }
+            });
+
+            editor.conversion.for('upcast').elementToAttribute({
+              view: {
+                name: 'span',
+                classes: 'inline-formula-pill'
+              },
+              model: {
+                key: 'inlineFormula',
+                value: viewElement => {
+                  const formula = viewElement.getAttribute('data-formula') || viewElement.getAttribute('data-cell-formula') || '=';
+                  const tIdx = parseInt(viewElement.getAttribute('data-table-idx'), 10) || 0;
+                  return { formula: formula, tableIdx: tIdx };
+                }
+              }
+            });
+
+            editor.conversion.for('upcast').elementToAttribute({
+              view: {
+                name: 'span',
+                attributes: {
+                  'data-formula': true
+                }
+              },
+              model: {
+                key: 'inlineFormula',
+                value: viewElement => {
+                  if (viewElement.parent && (viewElement.parent.name === 'tableCell' || viewElement.parent.name === 'table')) {
+                    return null;
+                  }
+                  const formula = viewElement.getAttribute('data-formula') || '=';
+                  const tIdx = parseInt(viewElement.getAttribute('data-table-idx'), 10) || 0;
+                  return { formula: formula, tableIdx: tIdx };
+                }
+              }
+            });
+
+            // Post-fixer: Automatically promote any \$ mention to a permanent tableCellRef attribute
+            editor.model.document.registerPostFixer(writer => {
+              let changed = false;
+              try {
+                const changes = editor.model.document.differ.getChanges();
+                for (const entry of changes) {
+                  if (entry.type === 'insert' || entry.type === 'attribute') {
+                    const range = entry.range || (entry.position ? writer.createRange(entry.position, entry.position.getShiftedBy(entry.length || 1)) : null);
+                    if (!range) continue;
+                    for (const item of range.getItems()) {
+                      if (item.is && item.is('\$text')) {
+                        const m = item.getAttribute('mention');
+                        if (m && (m.coord || (m.id && m.id.indexOf('\$') === 0))) {
+                          let coord = m.coord;
+                          let tIdx = m.tableIdx || 0;
+                          if (!coord && m.id) {
+                            let cleanId = m.id.indexOf('\$') === 0 ? m.id.substring(1) : m.id;
+                            if (cleanId.toUpperCase().indexOf('T') === 0 && cleanId.indexOf(':') !== -1) {
+                              const parts = cleanId.split(':');
+                              tIdx = parseInt(parts[0].substring(1), 10) - 1 || 0;
+                              cleanId = parts[1];
+                            }
+                            coord = cleanId.toUpperCase();
+                          }
+                          if (coord) {
+                            const curRef = item.getAttribute('tableCellRef');
+                            if (!curRef || curRef.coord !== coord || curRef.tableIdx !== tIdx) {
+                              writer.setAttribute('tableCellRef', { coord: coord, tableIdx: tIdx }, item);
+                              changed = true;
+                            }
+                            // Strip volatile mention attribute so CKEditor Mention post-fixer never removes the formatting
+                            if (item.hasAttribute('mention')) {
+                              writer.removeAttribute('mention', item);
+                              changed = true;
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              } catch (pfErr) {}
+              return changed;
+            });
           } catch (e) {
-            console.warn('dataFormula schema registration error:', e);
+            console.warn('schema registration error:', e);
           }
 
-          if (initialContent) {
-            const cleanInitial = sanitizeTableHtml(initialContent);
-            extractAndSeedFormulasFromHtml(cleanInitial);
-            extractAndSeedMediaStylesFromHtml(cleanInitial);
-            editor.setData(cleanInitial);
-            setTimeout(() => {
-              scanAndRegisterTableFormulas();
-              evaluateAllTableFormulas(false);
-              reapplyAllMediaStyles();
-            }, 100);
-            setTimeout(() => {
-              scanAndRegisterTableFormulas();
-              evaluateAllTableFormulas(false);
-              reapplyAllMediaStyles();
-            }, 350);
-            setTimeout(() => {
-              scanAndRegisterTableFormulas();
-              evaluateAllTableFormulas(false);
-              reapplyAllMediaStyles();
-            }, 700);
+          try {
+            if (initialContent) {
+              const cleanInitial = sanitizeTableHtml(initialContent);
+              const detectedDir = detectHtmlDirection(cleanInitial);
+              currentTextDir = detectedDir;
+              const sel = document.getElementById('select-dir');
+              if (sel) sel.value = detectedDir;
+
+              extractAndSeedFormulasFromHtml(cleanInitial);
+              extractAndSeedMediaStylesFromHtml(cleanInitial);
+              editor.setData(cleanInitial);
+              restoreTodoCheckedState(editor, cleanInitial);
+              setTimeout(() => {
+                changeLanguage(detectedDir, false);
+                scanAndRegisterTableFormulas();
+                evaluateAllTableFormulas(false);
+                reapplyAllMediaStyles();
+              }, 100);
+              setTimeout(() => {
+                scanAndRegisterTableFormulas();
+                evaluateAllTableFormulas(false);
+                reapplyAllMediaStyles();
+              }, 350);
+              setTimeout(() => {
+                scanAndRegisterTableFormulas();
+                evaluateAllTableFormulas(false);
+                reapplyAllMediaStyles();
+              }, 700);
+            } else if (currentTextDir === 'rtl') {
+              changeLanguage('rtl', false);
+            }
+          } catch (e) {
+            console.warn('initialContent setup error:', e);
           }
 
           /* Set up Base64 image upload adapter */
@@ -2095,13 +3772,19 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
           /* Content change listener - always use getEditorData() to preserve table formulas & media sizes */
           editor.model.document.on('change:data', (evt, batch) => {
+            pruneDeadTableFormulas();
             reapplyAllMediaStyles();
             const data = getEditorData();
             postToFlutter({ type: 'ckeditor_change', html: data });
             updateParaCount();
             updatePageIndicator();
             if (trackChangesEnabled) recordChange();
-            autoSaveRevision();
+            scheduleOutlineRefresh();
+            // Restoring a revision or syncing formula results must not create new revisions
+            if (!isRestoringRevision && !window._isUpdatingFormula) {
+              markRevisionDirty();
+              autoSaveRevision();
+            }
             // Only recalculate formulas if this is a real user edit batch, not an internal non-undoable formula sync
             if (!window._isUpdatingFormula && (!batch || batch.isUndoable !== false)) {
               scheduleLiveFormulaRecalc();
@@ -2162,6 +3845,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
           /* Track paragraph count */
           updateParaCount();
+          updatePageIndicator();
+
+          try { installBlockNavigation(editor); } catch (e) { console.warn('Block navigation setup failed:', e); }
+          const showBlocksCmd = editor.commands.get('showBlocks');
+          if (showBlocksCmd) showBlocksCmd.on('change:value', updateShowBlocksButton);
+          updateShowBlocksButton();
 
           /* Initial revision */
           saveRevision('Initial version');
@@ -2170,10 +3859,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         })
         .catch(err => {
           console.warn('CKEditor init failed, falling back:', err);
+          editorInstance = null;
           initFallback();
         });
       } catch (syncErr) {
         console.warn('CKEditor synchronous init failed, falling back:', syncErr);
+        editorInstance = null;
         initFallback();
       }
     }
@@ -2194,84 +3885,655 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     /* ====== FALLBACK ====== */
     function initFallback() {
-      if (isFallback || editorInstance) return;
+      if (isFallback) return;
+      if (editorInstance) return;
       isFallback = true;
-      document.getElementById('editor').style.display = 'none';
+      const loadingEl = document.getElementById('editor-loading');
+      if (loadingEl) loadingEl.style.display = 'none';
+      const editorEl = document.getElementById('editor');
+      if (editorEl) editorEl.style.display = 'none';
       const container = document.getElementById('fallback-container');
-      container.style.display = 'flex';
+      if (container) container.style.display = 'flex';
       const content = document.getElementById('fallback-content');
-      if (initialContent) content.innerHTML = sanitizeTableHtml(initialContent);
-      content.addEventListener('input', () => {
-        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
-      });
+      if (content) {
+        if (initialContent) {
+          try {
+            content.innerHTML = sanitizeTableHtml(initialContent);
+          } catch (e) {
+            content.innerHTML = initialContent;
+          }
+        }
+        if (currentTextDir === 'rtl' || detectHtmlDirection(initialContent) === 'rtl') {
+          changeLanguage('rtl', false);
+        }
+        content.addEventListener('input', () => {
+          updateFallbackStats();
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        });
+        updateFallbackStats();
+      }
       postToFlutter({ type: 'ckeditor_ready' });
+    }
+
+    function updateFallbackStats() {
+      const content = document.getElementById('fallback-content');
+      if (!content) return;
+      scheduleOutlineRefresh();
+      const text = content.innerText || content.textContent || '';
+      const words = text.trim() ? text.trim().split(/\\s+/).length : 0;
+      const chars = text.length;
+      const paras = content.querySelectorAll('p, h1, h2, h3, h4, h5, h6, div, li').length || (words > 0 ? 1 : 0);
+      const wc = document.getElementById('word-count');
+      if (wc) wc.textContent = 'Words: ' + words;
+      const cc = document.getElementById('char-count');
+      if (cc) cc.textContent = 'Characters: ' + chars;
+      const pc = document.getElementById('para-count');
+      if (pc) pc.textContent = 'Paragraphs: ' + paras;
     }
 
     function formatDoc(cmd, value = null) {
       document.execCommand(cmd, false, value);
       const content = document.getElementById('fallback-content');
-      postToFlutter({ type: 'ckeditor_change', html: content.innerHTML });
+      if (content) {
+        updateFallbackStats();
+        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+      }
     }
 
     function insertFallbackTable() {
       const html = '<table border="1" style="border-collapse:collapse;width:100%;margin:10px 0;">' +
         '<tr><th style="padding:8px;background:#e2e8f0;">Header 1</th><th style="padding:8px;background:#e2e8f0;">Header 2</th></tr>' +
-        '<tr><td style="padding:8px;">Cell 1</td><td style="padding:8px;">Cell 2</td></tr></table>';
+        '<tr><td style="padding:8px;">Cell 1</td><td style="padding:8px;">Cell 2</td></tr></table><p>&nbsp;</p>';
       document.execCommand('insertHTML', false, html);
+      updateFallbackStats();
+      postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+    }
+
+    function insertFallbackLink() {
+      const url = prompt('Enter URL:', 'https://');
+      if (url) formatDoc('createLink', url);
+    }
+
+    function insertFallbackHorizontalRule() {
+      formatDoc('insertHorizontalRule');
     }
 
     /* ====== EXPORT TO PDF ====== */
     function exportToPDF() {
-      const data = getEditorData();
-      if (!data) return;
-
-      /* Build a temporary printable div */
-      const printDiv = document.createElement('div');
-      printDiv.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;padding:40px;background:white;color:black;font-family:serif;font-size:12pt;line-height:1.6;';
-      printDiv.innerHTML = data;
-      document.body.appendChild(printDiv);
-
-      if (typeof html2canvas !== 'undefined' && typeof jspdf !== 'undefined') {
-        html2canvas(printDiv, { scale: 2, useCORS: true }).then(canvas => {
-          const { jsPDF } = jspdf;
-          const pdf = new jsPDF('p', 'mm', 'a4');
-          const imgData = canvas.toDataURL('image/png');
-          const pdfWidth = pdf.internal.pageSize.getWidth();
-          const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-          let position = 0;
-          const pageHeight = pdf.internal.pageSize.getHeight();
-
-          /* Multi-page support */
-          while (position < pdfHeight) {
-            if (position > 0) pdf.addPage();
-            pdf.addImage(imgData, 'PNG', 0, -position, pdfWidth, pdfHeight);
-            position += pageHeight;
-          }
-          pdf.save('document.pdf');
-          document.body.removeChild(printDiv);
-        });
-      } else {
-        /* Fallback: use browser print */
-        document.body.removeChild(printDiv);
-        window.print();
-      }
+      // Trigger native browser print dialog with full multi-page vector layout and Save as PDF
+      window.print();
     }
 
-    /* ====== EXPORT TO WORD ====== */
+    /* ====== EXPORT TO WORD (REAL .DOCX) ====== */
+    function generateDocxZipBlob(files) {
+      const crcTable = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let k = 0; k < 8; k++) {
+          c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        crcTable[i] = c;
+      }
+      function calcCrc32(bytes) {
+        let crc = 0xFFFFFFFF;
+        for (let i = 0; i < bytes.length; i++) {
+          crc = (crc >>> 8) ^ crcTable[(crc ^ bytes[i]) & 0xFF];
+        }
+        return (crc ^ 0xFFFFFFFF) >>> 0;
+      }
+
+      const textEncoder = new TextEncoder();
+      const entries = [];
+      let offset = 0;
+
+      for (const f of files) {
+        const nameBytes = textEncoder.encode(f.name);
+        const dataBytes = (f.data instanceof Uint8Array) ? f.data : textEncoder.encode(f.data);
+        const crc = calcCrc32(dataBytes);
+
+        const localHdr = new Uint8Array(30 + nameBytes.length);
+        const view = new DataView(localHdr.buffer);
+        view.setUint32(0, 0x04034b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 0, true);
+        view.setUint16(8, 0, true);
+        view.setUint16(10, 0, true);
+        view.setUint16(12, 0, true);
+        view.setUint32(14, crc, true);
+        view.setUint32(18, dataBytes.length, true);
+        view.setUint32(22, dataBytes.length, true);
+        view.setUint16(26, nameBytes.length, true);
+        view.setUint16(28, 0, true);
+        localHdr.set(nameBytes, 30);
+
+        entries.push({ nameBytes, dataBytes, crc, offset, localHdr });
+        offset += localHdr.length + dataBytes.length;
+      }
+
+      const cdHeaders = [];
+      let cdSize = 0;
+      for (const e of entries) {
+        const cdHdr = new Uint8Array(46 + e.nameBytes.length);
+        const view = new DataView(cdHdr.buffer);
+        view.setUint32(0, 0x02014b50, true);
+        view.setUint16(4, 20, true);
+        view.setUint16(6, 20, true);
+        view.setUint16(8, 0, true);
+        view.setUint16(10, 0, true);
+        view.setUint16(12, 0, true);
+        view.setUint16(14, 0, true);
+        view.setUint32(16, e.crc, true);
+        view.setUint32(20, e.dataBytes.length, true);
+        view.setUint32(24, e.dataBytes.length, true);
+        view.setUint16(28, e.nameBytes.length, true);
+        view.setUint16(30, 0, true);
+        view.setUint16(32, 0, true);
+        view.setUint16(34, 0, true);
+        view.setUint16(36, 0, true);
+        view.setUint32(38, 0, true);
+        view.setUint32(42, e.offset, true);
+        cdHdr.set(e.nameBytes, 46);
+
+        cdHeaders.push(cdHdr);
+        cdSize += cdHdr.length;
+      }
+
+      const eocd = new Uint8Array(22);
+      const eocdView = new DataView(eocd.buffer);
+      eocdView.setUint32(0, 0x06054b50, true);
+      eocdView.setUint16(4, 0, true);
+      eocdView.setUint16(6, 0, true);
+      eocdView.setUint16(8, entries.length, true);
+      eocdView.setUint16(10, entries.length, true);
+      eocdView.setUint32(12, cdSize, true);
+      eocdView.setUint32(16, offset, true);
+      eocdView.setUint16(20, 0, true);
+
+      const parts = [];
+      for (const e of entries) {
+        parts.push(e.localHdr);
+        parts.push(e.dataBytes);
+      }
+      for (const cd of cdHeaders) {
+        parts.push(cd);
+      }
+      parts.push(eocd);
+
+      return new Blob(parts, { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    }
+
     function exportToWord() {
-      const data = getEditorData();
+      let data = getEditorData();
       if (!data) return;
-      const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
-        '<head><meta charset="utf-8"><style>body{font-family:Calibri,sans-serif;font-size:11pt;line-height:1.6;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #000;padding:6px 8px;} pre{background:#f5f5f5;padding:10px;font-family:Consolas,monospace;} blockquote{border-left:3px solid #999;padding-left:12px;color:#555;font-style:italic;}</style></head>' +
-        '<body>' + data + '</body></html>';
-      const blob = new Blob([html], { type: 'application/msword' });
-      const url = URL.createObjectURL(blob);
+
+      const isRtl = (document.querySelector('.ck-content') && document.querySelector('.ck-content').getAttribute('dir') === 'rtl');
+
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(data, 'text/html');
+
+      function escapeXml(str) {
+        if (!str) return '';
+        return str
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+      }
+
+      function hexColor(str) {
+        if (!str) return null;
+        const m = str.match(/#([0-9a-fA-F]{6})/);
+        if (m) return m[1].toUpperCase();
+        const rgb = str.match(/rgb\\((\\d+),\\s*(\\d+),\\s*(\\d+)\\)/);
+        if (rgb) {
+          const r = parseInt(rgb[1]).toString(16).padStart(2, '0');
+          const g = parseInt(rgb[2]).toString(16).padStart(2, '0');
+          const b = parseInt(rgb[3]).toString(16).padStart(2, '0');
+          return (r + g + b).toUpperCase();
+        }
+        return null;
+      }
+
+      function processRuns(element, inheritedStyles = {}) {
+        let runsXml = '';
+        element.childNodes.forEach(child => {
+          if (child.nodeType === Node.TEXT_NODE) {
+            const text = child.nodeValue;
+            if (!text) return;
+            let rPr = '';
+            if (inheritedStyles.bold) rPr += '<w:b/><w:bCs/>';
+            if (inheritedStyles.italic) rPr += '<w:i/><w:iCs/>';
+            if (inheritedStyles.underline) rPr += '<w:u w:val="single"/>';
+            if (inheritedStyles.strike) rPr += '<w:strike/>';
+            if (inheritedStyles.color) rPr += '<w:color w:val="' + inheritedStyles.color + '"/>';
+            if (inheritedStyles.highlight) rPr += '<w:highlight w:val="' + inheritedStyles.highlight + '"/>';
+            if (inheritedStyles.size) rPr += '<w:sz w:val="' + inheritedStyles.size + '"/><w:szCs w:val="' + inheritedStyles.size + '"/>';
+            if (inheritedStyles.font) rPr += '<w:rFonts w:ascii="' + escapeXml(inheritedStyles.font) + '" w:hAnsi="' + escapeXml(inheritedStyles.font) + '" w:cs="' + escapeXml(inheritedStyles.font) + '"/>';
+
+            runsXml += '<w:r>' + (rPr ? '<w:rPr>' + rPr + '</w:rPr>' : '') +
+              '<w:t xml:space="preserve">' + escapeXml(text) + '</w:t></w:r>';
+          } else if (child.nodeType === Node.ELEMENT_NODE) {
+            const tag = child.tagName.toLowerCase();
+            const childStyles = Object.assign({}, inheritedStyles);
+
+            if (tag === 'b' || tag === 'strong' || child.style.fontWeight === 'bold' || parseInt(child.style.fontWeight) >= 600) {
+              childStyles.bold = true;
+            }
+            if (tag === 'i' || tag === 'em' || child.style.fontStyle === 'italic') {
+              childStyles.italic = true;
+            }
+            if (tag === 'u' || (child.style.textDecoration && child.style.textDecoration.includes('underline'))) {
+              childStyles.underline = true;
+            }
+            if (tag === 's' || tag === 'strike' || tag === 'del' || (child.style.textDecoration && child.style.textDecoration.includes('line-through'))) {
+              childStyles.strike = true;
+            }
+            if (child.style.color) {
+              const c = hexColor(child.style.color);
+              if (c) childStyles.color = c;
+            }
+            if (tag === 'mark' || child.style.backgroundColor) {
+              childStyles.highlight = 'yellow';
+            }
+            if (child.style.fontSize) {
+              const ptMatch = child.style.fontSize.match(/([0-9.]+)(?:px|pt)?/);
+              if (ptMatch) {
+                const pt = parseFloat(ptMatch[1]);
+                childStyles.size = Math.round(pt * 2);
+              }
+            }
+            if (child.style.fontFamily) {
+              childStyles.font = child.style.fontFamily.split(',')[0].replace(/['"]/g, '').trim();
+            }
+
+            if (tag === 'br') {
+              runsXml += '<w:r><w:br/></w:r>';
+            } else {
+              runsXml += processRuns(child, childStyles);
+            }
+          }
+        });
+        return runsXml;
+      }
+
+      function processParagraph(pElem, defaultHeading = null) {
+        let pPr = '';
+        let tag = pElem.tagName ? pElem.tagName.toLowerCase() : 'p';
+        const elDir = pElem.getAttribute('dir') || (isRtl ? 'rtl' : 'ltr');
+        const isElemRtl = (elDir === 'rtl');
+
+        const isHeading = defaultHeading || ['h1','h2','h3','h4','h5','h6'].includes(tag);
+        if (isHeading) {
+          const level = defaultHeading || tag;
+          const hMap = { h1: 36, h2: 30, h3: 26, h4: 24, h5: 22, h6: 20 };
+          const sz = hMap[level] || 24;
+          pPr += '<w:pStyle w:val="Heading' + level.charAt(1) + '"/>';
+          pPr += '<w:rPr><w:b/><w:bCs/><w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/></w:rPr>';
+        }
+
+        const align = pElem.style.textAlign || (isElemRtl ? 'right' : 'left');
+        if (align === 'center') pPr += '<w:jc w:val="center"/>';
+        else if (align === 'right') pPr += '<w:jc w:val="right"/>';
+        else if (align === 'justify') pPr += '<w:jc w:val="both"/>';
+        else if (align === 'left') pPr += '<w:jc w:val="left"/>';
+
+        if (isElemRtl) {
+          pPr += '<w:bidi/>';
+        }
+
+        if (tag === 'blockquote' || (pElem.closest && pElem.closest('blockquote'))) {
+          pPr += '<w:ind w:left="720"/>';
+        }
+
+        if ((pElem.classList && pElem.classList.contains('page-break')) || (pElem.querySelector && pElem.querySelector('.page-break'))) {
+          return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+        }
+
+        const runs = processRuns(pElem, isHeading ? { bold: true } : {});
+        return '<w:p>' + (pPr ? '<w:pPr>' + pPr + '</w:pPr>' : '') + runs + '</w:p>';
+      }
+
+      function processTable(tableElem) {
+        let tblXml = '<w:tbl>';
+        tblXml += '<w:tblPr>' +
+          '<w:tblW w:w="5000" w:type="pct"/>' +
+          '<w:tblBorders>' +
+          '<w:top w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>' +
+          '<w:left w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>' +
+          '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>' +
+          '<w:right w:val="single" w:sz="4" w:space="0" w:color="94A3B8"/>' +
+          '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/>' +
+          '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CBD5E1"/>' +
+          '</w:tblBorders>' +
+          (isRtl ? '<w:bidiVisual/>' : '') +
+          '</w:tblPr>';
+
+        const rows = tableElem.querySelectorAll('tr');
+        rows.forEach(tr => {
+          tblXml += '<w:tr>';
+          const cells = tr.querySelectorAll('th, td');
+          cells.forEach(cell => {
+            const isTh = cell.tagName.toLowerCase() === 'th';
+            let tcPr = '';
+            if (isTh) {
+              tcPr += '<w:shd w:val="clear" w:color="auto" w:fill="F1F5F9"/>';
+            }
+            const colspan = cell.getAttribute('colspan');
+            if (colspan && parseInt(colspan) > 1) {
+              tcPr += '<w:gridSpan w:val="' + colspan + '"/>';
+            }
+
+            tblXml += '<w:tc>' + (tcPr ? '<w:tcPr>' + tcPr + '</w:tcPr>' : '');
+            const cellParas = cell.querySelectorAll('p');
+            if (cellParas.length > 0) {
+              cellParas.forEach(p => { tblXml += processParagraph(p); });
+            } else {
+              tblXml += processParagraph(cell);
+            }
+            tblXml += '</w:tc>';
+          });
+          tblXml += '</w:tr>';
+        });
+        tblXml += '</w:tbl>';
+        return tblXml;
+      }
+
+      let bodyXml = '';
+      const topChildren = doc.body.childNodes;
+      topChildren.forEach(child => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          if (child.nodeValue.trim()) {
+            bodyXml += '<w:p><w:r><w:t xml:space="preserve">' + escapeXml(child.nodeValue.trim()) + '</w:t></w:r></w:p>';
+          }
+        } else if (child.nodeType === Node.ELEMENT_NODE) {
+          const tag = child.tagName.toLowerCase();
+          if (tag === 'table' || child.querySelector('table')) {
+            const tbl = tag === 'table' ? child : child.querySelector('table');
+            bodyXml += processTable(tbl);
+          } else if (tag === 'ul' || tag === 'ol') {
+            const items = child.querySelectorAll('li');
+            items.forEach((li, idx) => {
+              const bullet = (tag === 'ol') ? ((idx + 1) + '. ') : '• ';
+              let pPr = '<w:ind w:left="720"/>';
+              if (isRtl) pPr += '<w:bidi/><w:jc w:val="right"/>';
+              bodyXml += '<w:p><w:pPr>' + pPr + '</w:pPr>' +
+                '<w:r><w:t xml:space="preserve">' + bullet + '</w:t></w:r>' +
+                processRuns(li) + '</w:p>';
+            });
+          } else if (tag === 'hr') {
+            bodyXml += '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="CBD5E1"/></w:pBdr></w:pPr></w:p>';
+          } else {
+            bodyXml += processParagraph(child);
+          }
+        }
+      });
+
+      if (!bodyXml) {
+        bodyXml = '<w:p><w:r><w:t></w:t></w:r></w:p>';
+      }
+
+      bodyXml += '<w:sectPr>' +
+        '<w:pgSz w:w="12240" w:h="15840"/>' +
+        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/>' +
+        (isRtl ? '<w:bidi/>' : '') +
+        '</w:sectPr>';
+
+      const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        '<w:body>' + bodyXml + '</w:body></w:document>';
+
+      const contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+        '<Default Extension="xml" ContentType="application/xml"/>' +
+        '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+        '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+        '</Types>';
+
+      const relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+        '</Relationships>';
+
+      const wordRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+        '</Relationships>';
+
+      const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+        '<w:docDefaults>' +
+        '<w:rPrDefault>' +
+        '<w:rPr>' +
+        '<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>' +
+        '<w:sz w:val="22"/>' +
+        '<w:szCs w:val="22"/>' +
+        '</w:rPr>' +
+        '</w:rPrDefault>' +
+        '</w:docDefaults>' +
+        '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:bCs/><w:sz w:val="36"/><w:szCs w:val="36"/></w:rPr></w:style>' +
+        '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:rPr><w:b/><w:bCs/><w:sz w:val="30"/><w:szCs w:val="30"/></w:rPr></w:style>' +
+        '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:rPr><w:b/><w:bCs/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:style>' +
+        '</w:styles>';
+
+      const files = [
+        { name: '[Content_Types].xml', data: contentTypesXml },
+        { name: '_rels/.rels', data: relsXml },
+        { name: 'word/_rels/document.xml.rels', data: wordRelsXml },
+        { name: 'word/styles.xml', data: stylesXml },
+        { name: 'word/document.xml', data: documentXml }
+      ];
+
+      const zipBlob = generateDocxZipBlob(files);
+      const url = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'document.doc'; a.click();
+      a.href = url;
+      a.download = 'document.docx';
+      a.click();
       URL.revokeObjectURL(url);
     }
 
-    /* ====== IMPORT FROM WORD ====== */
+    /* ====== IMPORT FROM WORD (.DOCX / .HTML / .TXT) ====== */
+    async function extractDocxXmlFromZip(arrayBuffer) {
+      try {
+        const view = new DataView(arrayBuffer);
+        const bytes = new Uint8Array(arrayBuffer);
+        const len = bytes.length;
+
+        // 1. Locate End of Central Directory (EOCD) by scanning backwards
+        let eocdOffset = -1;
+        for (let i = len - 22; i >= Math.max(0, len - 65557); i--) {
+          if (view.getUint32(i, true) === 0x06054b50) {
+            eocdOffset = i;
+            break;
+          }
+        }
+
+        let docXmlEntry = null;
+
+        if (eocdOffset !== -1) {
+          const cdCount = view.getUint16(eocdOffset + 10, true);
+          const cdOffset = view.getUint32(eocdOffset + 16, true);
+          let p = cdOffset;
+          for (let k = 0; k < cdCount && p < eocdOffset; k++) {
+            if (view.getUint32(p, true) !== 0x02014b50) break;
+            const method = view.getUint16(p + 10, true);
+            const compSize = view.getUint32(p + 20, true);
+            const nameLen = view.getUint16(p + 28, true);
+            const extraLen = view.getUint16(p + 30, true);
+            const commentLen = view.getUint16(p + 32, true);
+            const localHdrOffset = view.getUint32(p + 42, true);
+            const nameBytes = bytes.subarray(p + 46, p + 46 + nameLen);
+            const fileName = new TextDecoder('utf-8').decode(nameBytes);
+
+            if (fileName === 'word/document.xml') {
+              docXmlEntry = { localHdrOffset: localHdrOffset, compSize: compSize, method: method };
+              break;
+            }
+            p += 46 + nameLen + extraLen + commentLen;
+          }
+        }
+
+        // Fallback: Scan local headers from beginning
+        if (!docXmlEntry) {
+          let pos = 0;
+          while (pos < len - 30) {
+            if (view.getUint32(pos, true) === 0x04034b50) {
+              const method = view.getUint16(pos + 8, true);
+              const compSize = view.getUint32(pos + 18, true);
+              const nameLen = view.getUint16(pos + 26, true);
+              const extraLen = view.getUint16(pos + 28, true);
+              const nameBytes = bytes.subarray(pos + 30, pos + 30 + nameLen);
+              const fileName = new TextDecoder('utf-8').decode(nameBytes);
+              if (fileName === 'word/document.xml') {
+                docXmlEntry = { localHdrOffset: pos, compSize: compSize, method: method };
+                break;
+              }
+              pos += 30 + nameLen + extraLen + compSize;
+            } else {
+              pos++;
+            }
+          }
+        }
+
+        if (!docXmlEntry) return null;
+
+        const lhOffset = docXmlEntry.localHdrOffset;
+        if (view.getUint32(lhOffset, true) !== 0x04034b50) return null;
+        const lhNameLen = view.getUint16(lhOffset + 26, true);
+        const lhExtraLen = view.getUint16(lhOffset + 28, true);
+        const dataStart = lhOffset + 30 + lhNameLen + lhExtraLen;
+        const compData = bytes.subarray(dataStart, dataStart + docXmlEntry.compSize);
+
+        if (docXmlEntry.method === 0) {
+          return new TextDecoder('utf-8').decode(compData);
+        } else if (docXmlEntry.method === 8) {
+          if (typeof DecompressionStream !== 'undefined') {
+            const ds = new DecompressionStream('deflate-raw');
+            const writer = ds.writable.getWriter();
+            writer.write(compData);
+            writer.close();
+            const res = new Response(ds.readable);
+            const decompBuf = await res.arrayBuffer();
+            return new TextDecoder('utf-8').decode(decompBuf);
+          }
+        }
+      } catch(e) {
+        console.warn('Docx extraction error:', e);
+      }
+      return null;
+    }
+
+    function convertDocxXmlToHtml(xmlStr) {
+      if (!xmlStr) return '<p>Unable to extract text from Word document.</p>';
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+        const body = xmlDoc.getElementsByTagName('w:body')[0] || xmlDoc.documentElement;
+        if (!body) return '<p>Empty document.</p>';
+
+        function escapeXmlText(str) {
+          return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function parseRunNode(rNode) {
+          let text = '';
+          const rPr = rNode.getElementsByTagName('w:rPr')[0];
+          const isBold = rPr && rPr.getElementsByTagName('w:b').length > 0;
+          const isItalic = rPr && rPr.getElementsByTagName('w:i').length > 0;
+          const isUnderline = rPr && rPr.getElementsByTagName('w:u').length > 0;
+          const isStrike = rPr && rPr.getElementsByTagName('w:strike').length > 0;
+
+          for (let i = 0; i < rNode.childNodes.length; i++) {
+            const child = rNode.childNodes[i];
+            const localName = child.localName || child.nodeName.split(':').pop();
+            if (localName === 't') {
+              text += escapeXmlText(child.textContent || '');
+            } else if (localName === 'br') {
+              text += '<br>';
+            } else if (localName === 'tab') {
+              text += '&emsp;';
+            }
+          }
+
+          if (!text) return '';
+          if (isBold) text = '<strong>' + text + '</strong>';
+          if (isItalic) text = '<em>' + text + '</em>';
+          if (isUnderline) text = '<u>' + text + '</u>';
+          if (isStrike) text = '<s>' + text + '</s>';
+          return text;
+        }
+
+        function parseParagraphNode(pNode) {
+          let pText = '';
+          const pPr = pNode.getElementsByTagName('w:pPr')[0];
+          let headingLevel = 0;
+          if (pPr) {
+            const pStyle = pPr.getElementsByTagName('w:pStyle')[0];
+            if (pStyle) {
+              const val = (pStyle.getAttribute('w:val') || pStyle.getAttribute('val') || '').toLowerCase();
+              if (val.includes('heading1') || val === '1') headingLevel = 1;
+              else if (val.includes('heading2') || val === '2') headingLevel = 2;
+              else if (val.includes('heading3') || val === '3') headingLevel = 3;
+              else if (val.includes('heading4') || val === '4') headingLevel = 4;
+            }
+          }
+
+          for (let i = 0; i < pNode.childNodes.length; i++) {
+            const child = pNode.childNodes[i];
+            const localName = child.localName || child.nodeName.split(':').pop();
+            if (localName === 'r') {
+              pText += parseRunNode(child);
+            }
+          }
+
+          if (!pText.trim()) return '';
+          if (headingLevel > 0) {
+            return '<h' + headingLevel + '>' + pText + '</h' + headingLevel + '>';
+          }
+          return '<p>' + pText + '</p>';
+        }
+
+        function parseTableNode(tblNode) {
+          let tblHtml = '<figure class="table"><table style="border-collapse:collapse;width:100%;border:1px solid #cbd5e1;"><tbody>';
+          const rows = tblNode.getElementsByTagName('w:tr');
+          for (let r = 0; r < rows.length; r++) {
+            tblHtml += '<tr>';
+            const cells = rows[r].getElementsByTagName('w:tc');
+            for (let c = 0; c < cells.length; c++) {
+              let cellContent = '';
+              const paras = cells[c].getElementsByTagName('w:p');
+              for (let p = 0; p < paras.length; p++) {
+                const pStr = parseParagraphNode(paras[p]);
+                if (pStr) cellContent += pStr;
+              }
+              tblHtml += '<td style="border:1px solid #cbd5e1;padding:6px 10px;">' + (cellContent || '<p>&nbsp;</p>') + '</td>';
+            }
+            tblHtml += '</tr>';
+          }
+          tblHtml += '</tbody></table></figure>';
+          return tblHtml;
+        }
+
+        let resultHtml = '';
+        for (let i = 0; i < body.childNodes.length; i++) {
+          const child = body.childNodes[i];
+          const localName = child.localName || child.nodeName.split(':').pop();
+          if (localName === 'p') {
+            resultHtml += parseParagraphNode(child);
+          } else if (localName === 'tbl') {
+            resultHtml += parseTableNode(child);
+          }
+        }
+
+        return resultHtml || '<p>Empty document content.</p>';
+      } catch(e) {
+        console.warn('Docx XML parse error:', e);
+        return '<p>Error rendering Word document XML.</p>';
+      }
+    }
+
     function importFromWord() {
       const input = document.createElement('input');
       input.type = 'file';
@@ -2279,25 +4541,69 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       input.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const reader = new FileReader();
-        if (file.name.endsWith('.txt')) {
+
+        const fileName = (file.name || '').toLowerCase();
+
+        if (fileName.endsWith('.txt')) {
+          const reader = new FileReader();
           reader.onload = (ev) => {
             const text = ev.target.result;
             const html = '<p>' + text.replace(/\\n\\n/g, '</p><p>').replace(/\\n/g, '<br>') + '</p>';
             setEditorData(html);
           };
           reader.readAsText(file);
-        } else if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
+        } else if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
+          const reader = new FileReader();
           reader.onload = (ev) => setEditorData(ev.target.result);
           reader.readAsText(file);
+        } else if (fileName.endsWith('.docx')) {
+          const reader = new FileReader();
+          reader.onload = async (ev) => {
+            const buffer = ev.target.result;
+
+            // 1. Try Mammoth if available (or dynamically load)
+            if (typeof mammoth === 'undefined') {
+              try {
+                await loadExternalScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.8.0/mammoth.browser.min.js', 2500);
+              } catch(err) {
+                console.warn('Mammoth CDN unavailable, using native docx parser');
+              }
+            }
+
+            if (typeof mammoth !== 'undefined' && mammoth.convertToHtml) {
+              try {
+                const res = await mammoth.convertToHtml({ arrayBuffer: buffer });
+                if (res && res.value && res.value.trim().length > 0) {
+                  setEditorData(res.value);
+                  return;
+                }
+              } catch(err) {
+                console.warn('Mammoth conversion error, falling back to native parser:', err);
+              }
+            }
+
+            // 2. Native DOCX ZIP + XML extraction fallback
+            const xml = await extractDocxXmlFromZip(buffer);
+            if (xml) {
+              const html = convertDocxXmlToHtml(xml);
+              setEditorData(html);
+            } else {
+              alert('Could not parse Word .docx document. Please make sure the file is a valid .docx document.');
+            }
+          };
+          reader.readAsArrayBuffer(file);
         } else {
-          /* For .doc/.docx, read as HTML (basic) */
+          // Legacy .doc or .rtf
+          const reader = new FileReader();
           reader.onload = (ev) => {
             const content = ev.target.result;
-            /* Try to extract readable content */
             const text = new TextDecoder('utf-8', {fatal: false}).decode(new Uint8Array(content));
-            const cleaned = text.replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/g, '');
-            setEditorData('<p>' + cleaned.substring(0, 50000) + '</p>');
+            const words = text.split(/[^A-Za-z0-9.,!?'"\\-:;()\\[\\]{}_+=/\\%@#*]+/).filter(w => w.length > 2 && !w.includes('Content_Types') && !w.includes('word/'));
+            if (words.length > 0) {
+              setEditorData('<p>' + words.join(' ').substring(0, 50000) + '</p>');
+            } else {
+              alert('Legacy .doc binary format cannot be parsed directly. Please save the file as modern .docx or .html and try again.');
+            }
           };
           reader.readAsArrayBuffer(file);
         }
@@ -2312,7 +4618,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     function toggleTrackChanges() {
       trackChangesEnabled = !trackChangesEnabled;
       const btn = document.getElementById('btn-track-changes');
-      btn.classList.toggle('active', trackChangesEnabled);
+      if (btn) btn.classList.toggle('active', trackChangesEnabled);
       document.getElementById('track-status').textContent = 'Track Changes: ' + (trackChangesEnabled ? 'On' : 'Off');
       if (trackChangesEnabled) openPanel('changes');
     }
@@ -2337,6 +4643,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     /* ====== REVISION HISTORY ====== */
     let autoSaveTimer = null;
+    let revisionSeq = 0;
+    /* Revision the editor currently shows unchanged; null once the user edits after it */
+    let activeRevisionId = null;
+    let isRestoringRevision = false;
+
     function autoSaveRevision() {
       clearTimeout(autoSaveTimer);
       autoSaveTimer = setTimeout(() => {
@@ -2344,29 +4655,54 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }, 30000); /* Auto-save every 30 seconds of inactivity */
     }
 
+    function markRevisionDirty() {
+      if (activeRevisionId === null) return;
+      activeRevisionId = null;
+      if (currentPanel === 'revisions') renderRevisionsPanel();
+    }
+
     function saveRevision(label) {
+      clearTimeout(autoSaveTimer);
+      /* Nothing edited since the shown revision -> nothing new to save */
+      if (activeRevisionId !== null && revisions.some(r => r.id === activeRevisionId)) return;
       const data = getEditorData();
       if (!data) return;
-      const lastRev = revisions.length > 0 ? revisions[0] : null;
-      if (lastRev && lastRev.content === data) return;
+      const existing = revisions.find(r => r.content === data);
+      if (existing) {
+        activeRevisionId = existing.id;
+        if (currentPanel === 'revisions') renderRevisionsPanel();
+        return;
+      }
 
-      revisions.unshift({
-        id: Date.now(),
+      const rev = {
+        id: ++revisionSeq,
         label: label || 'Revision ' + (revisions.length + 1),
         time: new Date().toLocaleString(),
         content: data,
         preview: getTextPreview(data, 80)
-      });
+      };
+      revisions.unshift(rev);
+      activeRevisionId = rev.id;
       if (revisions.length > 50) revisions.pop();
       if (currentPanel === 'revisions') renderRevisionsPanel();
     }
 
     function restoreRevision(id) {
       const rev = revisions.find(r => r.id === id);
-      if (rev) {
-        saveRevision('Before restore');
+      if (!rev || rev.id === activeRevisionId) return;
+      /* Keep unsaved edits so they can be restored later (no-op if nothing changed) */
+      saveRevision('Before restore');
+      clearTimeout(autoSaveTimer);
+      isRestoringRevision = true;
+      try {
+        window._lastExportedHtml = null; /* setEditorData skips html matching the last export */
         setEditorData(rev.content);
+      } finally {
+        /* setEditorData post-processes the content ~80ms later; ignore those changes too */
+        setTimeout(() => { isRestoringRevision = false; }, 250);
       }
+      activeRevisionId = rev.id;
+      if (currentPanel === 'revisions') renderRevisionsPanel();
     }
 
     /* ====== COMMENTS ====== */
@@ -2465,13 +4801,24 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         return;
       }
       let html = '<button onclick="saveRevision(&quot;Manual Save&quot;)" style="width:100%;padding:8px;margin-bottom:12px;border:1px solid #3b82f6;border-radius:6px;background:#eff6ff;color:#2563eb;cursor:pointer;font-size:13px;">💾 Save Revision Now</button>';
-      revisions.forEach((rev, i) => {
-        html += '<div class="revision-item' + (i === 0 ? ' active' : '') + '" onclick="restoreRevision(' + rev.id + ')">' +
-          '<div class="rev-title">' + escapeHtml(rev.label) + '</div>' +
+      revisions.forEach((rev) => {
+        const isActive = rev.id === activeRevisionId;
+        html += '<div class="revision-item' + (isActive ? ' active' : '') + '" onclick="restoreRevision(' + rev.id + ')">' +
+          '<div class="rev-title">' + escapeHtml(rev.label) + (isActive ? ' <span style="font-weight:400;font-size:11px;color:#2563eb;">(current)</span>' : '') + '</div>' +
           '<div class="rev-time">' + rev.time + '</div>' +
           '<div class="rev-preview">' + escapeHtml(rev.preview) + '</div></div>';
       });
       container.innerHTML = html;
+    }
+
+    /* An open Outline must follow the document (imports, typing, Flutter sync), not show a stale snapshot */
+    let outlineRefreshTimer = null;
+    function scheduleOutlineRefresh() {
+      if (currentPanel !== 'outline') return;
+      clearTimeout(outlineRefreshTimer);
+      outlineRefreshTimer = setTimeout(() => {
+        if (currentPanel === 'outline') renderOutlinePanel();
+      }, 150);
     }
 
     function renderOutlinePanel() {
@@ -2648,11 +4995,101 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     /* ====== SHOW BLOCKS ====== */
     function toggleShowBlocks() {
-      showBlocksEnabled = !showBlocksEnabled;
-      document.getElementById('btn-show-blocks').classList.toggle('active', showBlocksEnabled);
-      if (editorInstance) {
+      const cmd = editorInstance && editorInstance.commands.get('showBlocks');
+      if (cmd) {
+        /* The command owns the state, so this button and CKEditor's own toolbar button can never disagree */
         try { editorInstance.execute('showBlocks'); } catch(e) {}
+        editorInstance.editing.view.focus();
+      } else {
+        showBlocksEnabled = !showBlocksEnabled;
+        const fc = document.getElementById('fallback-content');
+        if (fc) fc.classList.toggle('show-blocks', showBlocksEnabled);
       }
+      updateShowBlocksButton();
+    }
+
+    function updateShowBlocksButton() {
+      const cmd = editorInstance && editorInstance.commands.get('showBlocks');
+      if (cmd) showBlocksEnabled = !!cmd.value;
+      const btn = document.getElementById('btn-show-blocks');
+      if (!btn) return;
+      btn.classList.toggle('active', showBlocksEnabled);
+      btn.textContent = showBlocksEnabled ? '✕ Hide Blocks' : '¶ Blocks';
+      btn.title = showBlocksEnabled ? 'Hide block outlines' : 'Show block outlines';
+    }
+
+    /* ====== LEAVING THE LAST BLOCK ======
+       A code block, quote, list or heading at the very end of the document has no line after it, and CKEditor's
+       exits (Enter x3 in code, Enter on an empty quote line) are hard to discover. Arrow Down/Right at its end, or a
+       click in the empty space below it, opens a new paragraph after it. */
+    /* A paragraph that is not a list item is already a normal line to type on */
+    function isPlainParagraph(element) {
+      return element.is('element', 'paragraph') && !element.hasAttribute('listItemId');
+    }
+
+    function getTrailingBlockToEscape(editor, direction) {
+      const model = editor.model;
+      const selection = model.document.selection;
+      const root = model.document.getRoot();
+      const last = root.getChild(root.childCount - 1);
+      if (!last || isPlainParagraph(last)) return null;
+      /* A selected widget (table, video, line...) at the end: typing would replace it, so step past it */
+      const selected = selection.getSelectedElement();
+      if (selected) return selected === last ? last : null;
+      if (!selection.isCollapsed) return null;
+      const pos = selection.getFirstPosition();
+      let top = pos.parent;
+      while (top && top.parent && top.parent !== root) top = top.parent;
+      if (top !== last) return null;
+      if (direction === 'down' && last.is('element', 'table')) {
+        /* Arrow Down from the last row would select the whole table */
+        const rows = Array.from(last.getChildren()).filter(n => n.is('element', 'tableRow'));
+        return pos.findAncestor('tableRow') === rows[rows.length - 1] ? last : null;
+      }
+      const rest = model.createRange(pos, model.createPositionAt(last, 'end'));
+      for (const item of rest.getItems()) {
+        if (item.is('\$textProxy') || item.is('element')) return null;
+      }
+      return last;
+    }
+
+    function insertParagraphAfter(editor, block) {
+      editor.model.change(writer => {
+        const paragraph = writer.createElement('paragraph');
+        writer.insert(paragraph, block, 'after');
+        writer.setSelection(paragraph, 0);
+      });
+      editor.editing.view.focus();
+      editor.editing.view.scrollToTheSelection();
+    }
+
+    function installBlockNavigation(editor) {
+      /* The capture context runs before CKEditor's own table/widget arrow handling (which would select the whole table) */
+      editor.editing.view.document.on('arrowKey', (evt, data) => {
+        if (data.shiftKey || data.altKey || data.ctrlKey || data.metaKey) return;
+        const forwardKey = currentTextDir === 'rtl' ? 37 : 39;
+        const direction = data.keyCode === 40 ? 'down' : (data.keyCode === forwardKey ? 'right' : null);
+        if (!direction) return;
+        const block = getTrailingBlockToEscape(editor, direction);
+        if (!block) return;
+        insertParagraphAfter(editor, block);
+        data.preventDefault();
+        evt.stop();
+      }, { context: '\$capture', priority: 'highest' });
+
+      const editable = editor.ui.getEditableElement();
+      if (!editable) return;
+      editable.addEventListener('mousedown', (e) => {
+        if (e.target !== editable || editor.isReadOnly) return;
+        const root = editor.model.document.getRoot();
+        const last = root.getChild(root.childCount - 1);
+        if (!last || isPlainParagraph(last)) return;
+        const viewEl = editor.editing.mapper.toViewElement(last);
+        const domEl = viewEl ? editor.editing.view.domConverter.mapViewToDom(viewEl) : null;
+        if (!domEl || e.clientY <= domEl.getBoundingClientRect().bottom) return;
+        e.preventDefault();
+        insertParagraphAfter(editor, last);
+      });
     }
 
     /* ====== FORMAT PAINTER ====== */
@@ -2672,23 +5109,151 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
-    /* ====== READ ONLY ====== */
+    /* ====== READ ONLY / PREVIEW ====== */
     function toggleReadonly() {
       isReadonly = !isReadonly;
-      document.getElementById('btn-readonly').classList.toggle('active', isReadonly);
+      const btn = document.getElementById('btn-readonly');
+      if (btn) {
+        btn.classList.toggle('active', isReadonly);
+        btn.innerHTML = isReadonly ? '✏️ Edit' : '👁️ Preview';
+        btn.title = isReadonly ? 'Exit Preview (Enable Editing)' : 'Toggle Preview (Read Only)';
+      }
       if (editorInstance) {
-        editorInstance.enableReadOnlyMode('custom-lock');
-        if (!isReadonly) editorInstance.disableReadOnlyMode('custom-lock');
+        if (isReadonly) {
+          editorInstance.enableReadOnlyMode('custom-lock');
+        } else {
+          editorInstance.disableReadOnlyMode('custom-lock');
+        }
+      }
+      if (isFallback) {
+        const fc = document.getElementById('fallback-content');
+        if (fc) fc.contentEditable = isReadonly ? 'false' : 'true';
       }
     }
 
     /* ====== TEXT DIRECTION ====== */
-    function changeLanguage(dir) {
-      const editable = document.querySelector('.ck-content');
-      if (editable) editable.style.direction = dir;
+    function detectHtmlDirection(html) {
+      if (!html || typeof html !== 'string') return 'ltr';
+      if (/dir=["']rtl["']/i.test(html) || /direction\\s*:\\s*rtl/i.test(html)) {
+        return 'rtl';
+      }
+      return 'ltr';
     }
 
-    /* ====== HELPERS ====== */
+    function changeLanguage(dir, notify = true) {
+      dir = (dir === 'rtl') ? 'rtl' : 'ltr';
+      currentTextDir = dir;
+
+      const sel = document.getElementById('select-dir');
+      if (sel && sel.value !== dir) sel.value = dir;
+
+      const editables = document.querySelectorAll('.ck-content, .ck-editor__editable, #fallback-content, #editor');
+      editables.forEach(el => {
+        el.setAttribute('dir', dir);
+        el.style.direction = dir;
+        el.style.textAlign = (dir === 'rtl' ? 'right' : 'left');
+      });
+
+      const editorMain = document.getElementById('editor-main');
+      if (editorMain) {
+        editorMain.setAttribute('dir', dir);
+        editorMain.style.direction = dir;
+      }
+
+      if (editorInstance) {
+        try {
+          if (editorInstance.editing && editorInstance.editing.view) {
+            editorInstance.editing.view.change(writer => {
+              const root = editorInstance.editing.view.document.getRoot();
+              if (root) {
+                writer.setAttribute('dir', dir, root);
+                writer.setStyle('direction', dir, root);
+                writer.setStyle('text-align', (dir === 'rtl' ? 'right' : 'left'), root);
+              }
+            });
+          }
+        } catch(e) {}
+
+        try {
+          const targetAlign = (dir === 'rtl') ? 'right' : 'left';
+          const schema = editorInstance.model.schema;
+          editorInstance.model.change(writer => {
+            const root = editorInstance.model.document.getRoot();
+            if (!root) return;
+            const range = editorInstance.model.createRangeIn(root);
+            for (const item of range.getItems()) {
+              if (item.is && item.is('element')) {
+                if (schema.checkAttribute(item, 'dir')) {
+                  writer.setAttribute('dir', dir, item);
+                }
+                if (schema.checkAttribute(item, 'alignment')) {
+                  writer.setAttribute('alignment', targetAlign, item);
+                }
+              }
+            }
+          });
+        } catch(e) {
+          console.warn('changeLanguage model update error:', e);
+        }
+      }
+
+      if (isFallback) {
+        const fc = document.getElementById('fallback-content');
+        if (fc) {
+          fc.setAttribute('dir', dir);
+          fc.style.direction = dir;
+          fc.style.textAlign = (dir === 'rtl' ? 'right' : 'left');
+        }
+      }
+
+      if (notify) {
+        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+      }
+    }
+
+    /* Unique table identification - attached in memory to HTMLTableElement and DOM attribute so instances are never confused */
+    function getTableUid(table) {
+      if (!table) return 'tbl_0';
+      let uid = (table.getAttribute && table.getAttribute('data-table-uid')) || table._tableUid;
+      if (!uid) {
+        const liveTables = getEditorLiveTables();
+        const idx = Math.max(0, liveTables.indexOf(table));
+        uid = 'tbl_' + idx;
+      }
+      table._tableUid = uid;
+      if (table.setAttribute && !table.getAttribute('data-table-uid')) {
+        try { table.setAttribute('data-table-uid', uid); } catch(e) {}
+      }
+      return uid;
+    }
+
+    function pruneDeadTableFormulas() {
+      if (!window._tableFormulaRegistry) return;
+      const liveTables = getEditorLiveTables();
+      if (liveTables.length === 0) return;
+
+      for (let k in window._tableFormulaRegistry) {
+        let isAlive = false;
+        for (let tIdx = 0; tIdx < liveTables.length; tIdx++) {
+          const t = liveTables[tIdx];
+          const uid = getTableUid(t);
+          if (k.startsWith(uid + '_') || k.startsWith(tIdx + '_')) {
+            const suffix = k.startsWith(uid + '_') ? k.substring(uid.length + 1) : k.substring(String(tIdx).length + 1);
+            const parts = suffix.split('_');
+            const r = parseInt(parts[0], 10);
+            const c = parseInt(parts[1], 10);
+            if (!isNaN(r) && !isNaN(c) && t.rows && r < t.rows.length && c < (t.rows[r]?.cells?.length || 0)) {
+              isAlive = true;
+            }
+            break;
+          }
+        }
+        if (!isAlive) {
+          delete window._tableFormulaRegistry[k];
+        }
+      }
+    }
+
     /* Dedicated helper: selects only editor tables and ignores any tables in modals or popups */
     function getEditorLiveTables() {
       const tables = Array.from(document.querySelectorAll('.ck-content table, .ck-editor__editable table, #fallback-content table'));
@@ -2700,7 +5265,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const idx = title.indexOf('Formula:');
       if (idx === -1) return null;
       let cand = title.substring(idx + 8).trim();
-      cand = cand.replace(/\s*\([Cc]lick[^\)]*\)/g, '').trim();
+      cand = cand.replace(/\\s*\\([Cc]lick[^)]*\\)/g, '').trim();
       cand = cleanFormulaText(cand);
       return cand.startsWith('=') ? cand : null;
     }
@@ -2735,8 +5300,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
               let node;
               while (node = walker.nextNode()) {
-                if (/\b\d+\s*fx\b/i.test(node.nodeValue)) {
-                  node.nodeValue = node.nodeValue.replace(/(\d+)\s*fx\b/gi, '\$1');
+                if (/\\b\\d+\\s*fx\\b/i.test(node.nodeValue)) {
+                  node.nodeValue = node.nodeValue.replace(/(\\d+)\\s*fx\\b/gi, '\$1');
                 } else if (node.nodeValue.trim() === 'fx') {
                   node.nodeValue = '';
                 }
@@ -2774,12 +5339,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
         tables.forEach((t, tIdx) => {
           const liveT = liveTables[tIdx];
+          const tableUid = liveT ? getTableUid(liveT) : null;
           const rows = t.rows;
           for (let r = 0; r < rows.length; r++) {
             const cells = rows[r].cells;
             for (let c = 0; c < cells.length; c++) {
               const cell = cells[c];
-              const regKey = tIdx + '_' + r + '_' + c;
+              const regKey = tableUid ? (tableUid + '_' + r + '_' + c) : null;
               let formula = null;
               if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
                 const liveC = liveT.rows[r].cells[c];
@@ -2799,16 +5365,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (!formula && cell.getAttribute('title')) {
                 formula = extractFormulaFromTitle(cell.getAttribute('title'));
               }
-              if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
+              if (!formula && regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
                 formula = window._tableFormulaRegistry[regKey];
+              }
+              if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[tIdx + '_' + r + '_' + c]) {
+                formula = window._tableFormulaRegistry[tIdx + '_' + r + '_' + c];
+                if (regKey) window._tableFormulaRegistry[regKey] = formula;
               }
 
               // Strip accidental 'fx' suffix from cell text
               const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
               let node;
               while (node = walker.nextNode()) {
-                if (/\b\d+\s*fx\b/i.test(node.nodeValue)) {
-                  node.nodeValue = node.nodeValue.replace(/(\d+)\s*fx\b/gi, '\$1');
+                if (/\\b\\d+\\s*fx\\b/i.test(node.nodeValue)) {
+                  node.nodeValue = node.nodeValue.replace(/(\\d+)\\s*fx\\b/gi, '\$1');
                 } else if (node.nodeValue.trim() === 'fx') {
                   node.nodeValue = '';
                 }
@@ -2817,20 +5387,107 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (formula) formula = cleanFormulaText(formula);
               if (formula && formula.startsWith('=')) {
                 window._tableFormulaRegistry = window._tableFormulaRegistry || {};
-                window._tableFormulaRegistry[regKey] = formula;
+                if (regKey) window._tableFormulaRegistry[regKey] = formula;
+                window._tableFormulaRegistry[tIdx + '_' + r + '_' + c] = formula;
                 cell.setAttribute('data-formula', formula);
                 cell.setAttribute('title', 'Formula: ' + formula);
                 cell.classList.add('has-formula');
+                let cellVal = null;
+                if (liveT && liveT.rows && liveT.rows[r] && liveT.rows[r].cells && liveT.rows[r].cells[c]) {
+                  cellVal = liveT.rows[r].cells[c].getAttribute('data-formula-val');
+                }
+                if (!cellVal) cellVal = cell.getAttribute('data-formula-val');
+                if (cellVal != null && cellVal !== '') {
+                  cell.setAttribute('data-formula-val', cellVal);
+                }
               } else {
                 cell.removeAttribute('data-formula');
                 cell.removeAttribute('title');
                 cell.classList.remove('has-formula');
+                if (regKey && window._tableFormulaRegistry) {
+                  delete window._tableFormulaRegistry[regKey];
+                }
               }
               // Clean out any span that might be inside cell
               cell.querySelectorAll('.formula-badge').forEach(b => b.remove());
             }
           }
         });
+
+        // Ensure table cell references in text have fresh values from tables
+        const allSpans = Array.from(doc.querySelectorAll('.table-cell-ref, .mention, span[data-cell-coord]'));
+        const refSpans = allSpans.filter(s => s.classList.contains('table-cell-ref') || s.hasAttribute('data-cell-coord') || (s.getAttribute('data-mention') && s.getAttribute('data-mention').indexOf('\$') === 0));
+        refSpans.forEach(span => {
+          let rawCoord = span.getAttribute('data-cell-coord');
+          let tIdx = 0;
+          if (!rawCoord) {
+            const mentionId = span.getAttribute('data-mention') || '';
+            if (mentionId.indexOf('\$') === 0) {
+              let cleanId = mentionId.substring(1);
+              if (cleanId.toUpperCase().indexOf('T') === 0 && cleanId.indexOf(':') !== -1) {
+                const parts = cleanId.split(':');
+                tIdx = parseInt(parts[0].substring(1), 10) - 1 || 0;
+                cleanId = parts[1];
+              }
+              rawCoord = cleanId.toUpperCase();
+            }
+          } else {
+            const tAttr = span.getAttribute('data-table-idx');
+            if (tAttr) tIdx = parseInt(tAttr, 10);
+          }
+          if (rawCoord) {
+            const targetTable = tables[tIdx] || tables[0];
+            if (targetTable) {
+              const pos = parseCellCoord(rawCoord);
+              if (pos && pos.row >= 0 && pos.row < targetTable.rows.length && pos.col >= 0 && pos.col < targetTable.rows[pos.row].cells.length) {
+                const targetCell = targetTable.rows[pos.row].cells[pos.col];
+                const formulaVal = targetCell.getAttribute('data-formula-val');
+                const freshVal = (formulaVal != null && formulaVal !== '') ? formulaVal : cleanFormulaText(targetCell.innerText || targetCell.textContent || '');
+                if (freshVal) {
+                  span.textContent = freshVal;
+                  span.setAttribute('title', 'Table cell ' + rawCoord + ': "' + freshVal + '" (Live Link)');
+                }
+              }
+            }
+            span.classList.add('table-cell-ref');
+            span.classList.add('mention');
+            span.setAttribute('data-cell-coord', rawCoord);
+            span.setAttribute('data-table-idx', tIdx);
+            if (!span.getAttribute('data-mention')) {
+              const token = '\$' + (tIdx > 0 ? ('T' + (tIdx + 1) + ':' + rawCoord) : rawCoord);
+              span.setAttribute('data-mention', token);
+            }
+          }
+        });
+
+        // Ensure inline formulas in text have fresh calculated values from tables
+        const formulaSpans = Array.from(doc.querySelectorAll('.inline-formula-pill, span[data-formula]')).filter(s => !s.closest('td, th'));
+        formulaSpans.forEach(span => {
+          const formula = span.getAttribute('data-formula') || span.getAttribute('data-inline-formula');
+          if (formula && formula.startsWith('=')) {
+            let tIdx = parseInt(span.getAttribute('data-table-idx'), 10) || 0;
+            const targetTable = tables[tIdx] || tables[0];
+            if (targetTable) {
+              const grid = [];
+              for (let r = 0; r < targetTable.rows.length; r++) {
+                grid[r] = [];
+                for (let c = 0; c < targetTable.rows[r].cells.length; c++) {
+                  const curCell = targetTable.rows[r].cells[c];
+                  grid[r][c] = curCell.getAttribute('data-formula-val') || cleanFormulaText(curCell.innerText || curCell.textContent || '');
+                }
+              }
+              const res = evaluateFormulaString(formula, grid, -1, -1);
+              if (res !== null && !isNaN(res)) {
+                span.textContent = String(res);
+                span.setAttribute('title', 'Formula: ' + formula + ' = ' + res + ' (Live Calculation)');
+              }
+            }
+            span.classList.add('inline-formula-pill');
+            span.setAttribute('data-formula', formula);
+            span.setAttribute('data-table-idx', tIdx);
+          }
+        });
+
         return doc.body.innerHTML;
       } catch (e) {
         console.warn('cleanAndExportFormulasInHtml error:', e);
@@ -2917,6 +5574,40 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
+    function applyDirectionToHtml(html, dir) {
+      if (!html || typeof html !== 'string') return html;
+      try {
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        const targetDir = (dir === 'rtl') ? 'rtl' : 'ltr';
+        const targetAlign = (targetDir === 'rtl') ? 'right' : 'left';
+
+        const blocks = doc.querySelectorAll('p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, table, div:not(.media):not(.page-break)');
+
+        if (blocks.length === 0 && doc.body.textContent.trim()) {
+          const p = doc.createElement('p');
+          p.setAttribute('dir', targetDir);
+          p.style.textAlign = targetAlign;
+          p.innerHTML = doc.body.innerHTML;
+          doc.body.innerHTML = '';
+          doc.body.appendChild(p);
+        } else {
+          blocks.forEach(el => {
+            el.setAttribute('dir', targetDir);
+            const currentAlign = el.style.textAlign;
+            if (!currentAlign || currentAlign === 'left' || currentAlign === 'right') {
+              el.style.textAlign = targetAlign;
+            }
+          });
+        }
+
+        return doc.body.innerHTML;
+      } catch (e) {
+        console.warn('applyDirectionToHtml error:', e);
+        return html;
+      }
+    }
+
     function getEditorData() {
       let data = '';
       if (editorInstance) {
@@ -2924,8 +5615,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       } else if (isFallback) {
         data = document.getElementById('fallback-content').innerHTML;
       }
+      data = applyDirectionToHtml(data, currentTextDir);
       data = cleanAndExportFormulasInHtml(data);
-      return cleanAndExportMediaStylesInHtml(data);
+      data = cleanAndExportMediaStylesInHtml(data);
+      window._lastExportedHtml = data;
+      return data;
     }
 
     function extractAndSeedFormulasFromHtml(html) {
@@ -2934,8 +5628,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
         const tables = doc.querySelectorAll('table');
-        window._tableFormulaRegistry = {};
+        window._tableFormulaRegistry = window._tableFormulaRegistry || {};
         tables.forEach((t, tIdx) => {
+          const tableUid = t.getAttribute('data-table-uid');
           for (let r = 0; r < t.rows.length; r++) {
             for (let c = 0; c < t.rows[r].cells.length; c++) {
               const cell = t.rows[r].cells[c];
@@ -2951,11 +5646,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (!formula) {
                 const rawTxt = (cell.innerText || cell.textContent || '').trim();
                 const cleanTxt = cleanFormulaText(rawTxt);
-                if (cleanTxt.startsWith('=')) formula = cleanTxt;
+                if (looksLikeFormula(cleanTxt)) formula = cleanTxt;
               }
               if (formula) {
-                const cleanF = cleanFormulaText(formula);
-                if (cleanF.startsWith('=')) {
+                const cleanF = normalizeFormulaString(formula);
+                if (cleanF && cleanF.startsWith('=')) {
+                  if (tableUid) window._tableFormulaRegistry[tableUid + '_' + r + '_' + c] = cleanF;
                   window._tableFormulaRegistry[tIdx + '_' + r + '_' + c] = cleanF;
                 }
               }
@@ -2967,33 +5663,80 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }
 
+    /* CKEditor 41 writes a to-do item whose paragraph has attributes (this app always adds dir/alignment) as
+       <label class="todo-list__label_without-description"><input checked></label><p>..</p>, but cannot read the
+       checked state back from that form. Re-apply it from the HTML to the to-do items, which share its order. */
+    function restoreTodoCheckedState(editor, html) {
+      if (!editor || !html || html.indexOf('todo-list') === -1) return;
+      try {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const checkedFlags = Array.from(doc.querySelectorAll('ul.todo-list li')).map(li => {
+          const box = Array.from(li.querySelectorAll('input[type=checkbox]')).find(i => i.closest('li') === li);
+          return !!(box && box.hasAttribute('checked'));
+        });
+        if (!checkedFlags.some(Boolean)) return;
+
+        const model = editor.model;
+        const items = [];
+        const seen = new Map();
+        for (const value of model.createRangeIn(model.document.getRoot()).getWalker({ ignoreElementEnd: true })) {
+          const el = value.item;
+          if (!el.is('element') || el.getAttribute('listType') !== 'todo') continue;
+          const id = el.getAttribute('listItemId');
+          if (!seen.has(id)) { seen.set(id, []); items.push(id); }
+          seen.get(id).push(el);
+        }
+        model.enqueueChange({ isUndoable: false }, writer => {
+          items.forEach((id, i) => {
+            if (!checkedFlags[i]) return;
+            for (const block of seen.get(id)) {
+              if (!block.getAttribute('todoListChecked')) writer.setAttribute('todoListChecked', true, block);
+            }
+          });
+        });
+      } catch (e) {
+        console.warn('restoreTodoCheckedState error:', e);
+      }
+    }
+
     function setEditorData(html) {
+      if (window._lastExportedHtml && (html === window._lastExportedHtml || html.trim() === window._lastExportedHtml.trim())) {
+        return;
+      }
+
       const cleanHtml = sanitizeTableHtml(html);
       extractAndSeedFormulasFromHtml(cleanHtml);
       extractAndSeedMediaStylesFromHtml(cleanHtml);
+
       if (editorInstance) {
-        if (editorInstance.getData() === cleanHtml) {
+        const currentData = getEditorData();
+        if (currentData === cleanHtml || currentData.trim() === cleanHtml.trim()) {
           reapplyAllMediaStyles();
           return;
         }
+
+        const detected = detectHtmlDirection(cleanHtml);
+        currentTextDir = detected;
+        const sel = document.getElementById('select-dir');
+        if (sel) sel.value = detected;
+
         editorInstance.setData(cleanHtml);
+        restoreTodoCheckedState(editorInstance, cleanHtml);
         setTimeout(() => {
+          changeLanguage(detected, false);
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
           reapplyAllMediaStyles();
         }, 80);
-        setTimeout(() => {
-          scanAndRegisterTableFormulas();
-          evaluateAllTableFormulas(false);
-          reapplyAllMediaStyles();
-        }, 300);
-        setTimeout(() => {
-          scanAndRegisterTableFormulas();
-          evaluateAllTableFormulas(false);
-          reapplyAllMediaStyles();
-        }, 600);
       } else if (isFallback) {
+        const detected = detectHtmlDirection(cleanHtml);
+        currentTextDir = detected;
+        const sel = document.getElementById('select-dir');
+        if (sel) sel.value = detected;
+
         document.getElementById('fallback-content').innerHTML = cleanHtml;
+        changeLanguage(detected, false);
+        scheduleOutlineRefresh();
         setTimeout(() => {
           scanAndRegisterTableFormulas();
           evaluateAllTableFormulas(false);
@@ -3025,17 +5768,49 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       document.getElementById('para-count').textContent = 'Paragraphs: ' + paras;
     }
 
+    /* The element that actually scrolls the document (.ck-editor__main in the normal layout) */
+    function getEditorScrollContainer(editable) {
+      for (let el = editable; el && el !== document.body; el = el.parentElement) {
+        const overflowY = getComputedStyle(el).overflowY;
+        if ((overflowY === 'auto' || overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+      }
+      return document.scrollingElement || document.documentElement;
+    }
+
     function updatePageIndicator() {
       const editable = document.querySelector('.ck-content, #fallback-content');
-      if (!editable) return;
+      const indicator = document.getElementById('page-indicator');
+      if (!editable || !indicator) return;
       /* Estimate page based on content height (A4 ≈ 1120px at 96dpi) */
-      const contentHeight = editable.scrollHeight;
       const pageHeight = 1120;
+      const contentHeight = editable.scrollHeight;
       const pages = Math.max(1, Math.ceil(contentHeight / pageHeight));
-      const currentScroll = editable.scrollTop || 0;
-      const currentPage = Math.max(1, Math.ceil((currentScroll + 1) / pageHeight));
-      document.getElementById('page-indicator').textContent = 'Page ' + currentPage + ' of ' + pages;
+
+      const scroller = getEditorScrollContainer(editable);
+      const isPageScroller = scroller === document.scrollingElement || scroller === document.documentElement;
+      const viewTop = isPageScroller ? 0 : scroller.getBoundingClientRect().top;
+      const viewHeight = isPageScroller ? window.innerHeight : scroller.clientHeight;
+      /* Page under the middle of the visible area; the last page once scrolled to the bottom */
+      const visibleTopInContent = viewTop - editable.getBoundingClientRect().top;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+      let currentPage = atBottom && scroller.scrollTop > 0
+        ? pages
+        : Math.floor((visibleTopInContent + viewHeight / 2) / pageHeight) + 1;
+      currentPage = Math.min(pages, Math.max(1, currentPage));
+      indicator.textContent = 'Page ' + currentPage + ' of ' + pages;
     }
+
+    let pageIndicatorFrame = 0;
+    function schedulePageIndicatorUpdate() {
+      if (pageIndicatorFrame) return;
+      pageIndicatorFrame = requestAnimationFrame(() => {
+        pageIndicatorFrame = 0;
+        updatePageIndicator();
+      });
+    }
+    /* scroll does not bubble; capture catches the editor's inner scroll container too */
+    window.addEventListener('scroll', schedulePageIndicatorUpdate, true);
+    window.addEventListener('resize', schedulePageIndicatorUpdate);
 
     /* ====== UNIVERSAL TABLE FORMULA EVALUATOR ====== */
     function cleanFormulaText(raw) {
@@ -3058,6 +5833,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
       }
       return clean;
+    }
+
+    function looksLikeFormula(raw) {
+      if (!raw) return false;
+      const s = cleanFormulaText(raw).trim().toUpperCase();
+      if (s.startsWith('=')) return true;
+      if (/^(SUM|AVG|AVERAGE|COUNT|MAX|MIN|PRODUCT|ROUND)\\s*\\(/i.test(s)) return true;
+      if (/^[A-Z]+[0-9]+\\s*[+\\-*/]/.test(s)) return true;
+      return false;
     }
 
     function normalizeFormulaString(raw) {
@@ -3134,6 +5918,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         rawExpr = rawExpr.substring(1).trim();
       }
       if (!rawExpr) return null;
+
+      // Normalize table prefixes, dollar signs, and bracketed pill notations:
+      rawExpr = rawExpr.replace(/\\\$?T[0-9]+:([A-Za-z]+[0-9]+)/gi, '\$1');
+      rawExpr = rawExpr.replace(/\\\$([A-Za-z]+[0-9]+)/g, '\$1');
+      rawExpr = rawExpr.replace(/\\[(?:📊|fx)?\\s*([0-9]+(?:\\.[0-9]+)?)\\s*\\]/gi, '\$1');
 
       function getCellValue(cCoord) {
         const pos = parseCellCoord(cCoord);
@@ -3352,7 +6141,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         const parts = inner.split(',');
         const vals = [];
         for (let i = 0; i < parts.length; i++) {
-          const p = parts[i].trim();
+          let p = parts[i].trim();
+          p = p.replace(/^\\\$?T[0-9]+:/i, '').replace(/^\\\$/, '');
           const coord = parseCellCoord(p);
           if (coord) vals.push(getCellValue(p));
           else { const n = parseFloat(p); if (!isNaN(n)) vals.push(n); }
@@ -3400,11 +6190,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         return '(' + inner + ')';
       });
 
-      // 13. Replace individual coordinates like A1, A2, B3 with cell values
-      expr = expr.replace(/([A-Za-z]+[0-9]+)/g, (match) => {
-        const coord = parseCellCoord(match);
+      // 13. Replace individual coordinates like A1, A2, B3 (with optional \$) with cell values
+      expr = expr.replace(/\\\$?([A-Za-z]+[0-9]+)/g, (match, coordName) => {
+        const coord = parseCellCoord(coordName);
         if (coord) {
-          return getCellValue(match);
+          return getCellValue(coordName);
         }
         return match;
       });
@@ -3424,7 +6214,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           i++;
           continue;
         }
-        if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '(' || ch === ')') {
+        if (ch === '+' || ch === '-' || ch === '*' || ch === '/' || ch === '(' || ch === ')' || ch === '%') {
           tokens.push(ch);
           i++;
           continue;
@@ -3503,7 +6293,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         return val;
       }
 
+      /* Postfix % (as in Excel): divides the number or bracketed group before it by 100, binding tighter than * and / */
       function parseFactor() {
+        var val = parsePrimary();
+        if (val === null) return null;
+        while (pos < processed.length && processed[pos] === '%') {
+          pos++;
+          val /= 100;
+        }
+        return val;
+      }
+
+      function parsePrimary() {
         if (pos >= processed.length) return null;
         var t = processed[pos++];
         if (typeof t === 'number') return t;
@@ -3548,9 +6349,12 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (rows[r]) {
                 const cells = Array.from(rows[r].getChildren()).filter(n => n.name === 'tableCell');
                 const targetCell = cells[c];
-                if (targetCell && targetCell.hasAttribute('dataFormula')) {
+                if (targetCell && (targetCell.hasAttribute('dataFormula') || targetCell.hasAttribute('dataFormulaVal'))) {
                   const removeAttr = (writer) => {
-                    try { writer.removeAttribute('dataFormula', targetCell); } catch(e) {}
+                    try {
+                      writer.removeAttribute('dataFormula', targetCell);
+                      writer.removeAttribute('dataFormulaVal', targetCell);
+                    } catch(e) {}
                   };
                   let batch = null;
                   if (typeof editor.model.createBatch === 'function') {
@@ -3577,13 +6381,16 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const validKeys = new Set();
 
       liveTables.forEach((table, tableIdx) => {
+        const tableUid = getTableUid(table);
         const rows = table.rows;
         if (!rows) return;
         for (let r = 0; r < rows.length; r++) {
           for (let c = 0; c < rows[r].cells.length; c++) {
             const cell = rows[r].cells[c];
-            const regKey = tableIdx + '_' + r + '_' + c;
+            const regKey = tableUid + '_' + r + '_' + c;
+            const idxKey = tableIdx + '_' + r + '_' + c;
             validKeys.add(regKey);
+            validKeys.add(idxKey);
 
             let rawText = '';
             for (let n of cell.childNodes) {
@@ -3593,53 +6400,51 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             rawText = rawText.replace(/\\bfx\\b/gi, '').trim();
             const cleanTxt = cleanFormulaText(rawText);
 
-            // Find formula from attributes, children, or existing registry
-            let attrFormula = cell.getAttribute ? cell.getAttribute('data-formula') : null;
-            if (!attrFormula && cell.getAttribute && cell.getAttribute('title')) {
-              attrFormula = extractFormulaFromTitle(cell.getAttribute('title'));
-            }
-            if (!attrFormula && cell.querySelector) {
-              const elF = cell.querySelector('[data-formula]');
-              if (elF) {
-                attrFormula = elF.getAttribute('data-formula');
-              } else {
-                const withTitle = cell.querySelector('[title*="Formula:"]');
-                if (withTitle) attrFormula = extractFormulaFromTitle(withTitle.getAttribute('title'));
-              }
-            }
-            if (!attrFormula && window._tableFormulaRegistry[regKey]) {
-              attrFormula = window._tableFormulaRegistry[regKey];
+            // Find formula from cell attributes, children, or registry
+            let formula = null;
+            if (looksLikeFormula(cleanTxt)) {
+              formula = normalizeFormulaString(cleanTxt);
+            } else if (cell.getAttribute && cell.getAttribute('data-formula')) {
+              formula = normalizeFormulaString(cell.getAttribute('data-formula'));
+            } else if (cell.getAttribute && cell.getAttribute('title')) {
+              const f = extractFormulaFromTitle(cell.getAttribute('title'));
+              if (f) formula = normalizeFormulaString(f);
+            } else if (cell.querySelector && cell.querySelector('[data-formula]')) {
+              formula = normalizeFormulaString(cell.querySelector('[data-formula]').getAttribute('data-formula'));
+            } else if (window._tableFormulaRegistry[regKey]) {
+              formula = normalizeFormulaString(window._tableFormulaRegistry[regKey]);
+            } else if (window._tableFormulaRegistry[idxKey]) {
+              formula = normalizeFormulaString(window._tableFormulaRegistry[idxKey]);
             }
 
-            const lastVal = cell.getAttribute ? cell.getAttribute('data-formula-val') : null;
             const isFocused = cell.contains(document.activeElement);
 
-            // Only remove formula if user explicitly edited text to a different static value after blur:
-            if (attrFormula && !isFocused && lastVal !== null && cleanTxt !== '' && cleanTxt !== lastVal && !cleanTxt.startsWith('=')) {
-              if (cell.removeAttribute) {
-                cell.removeAttribute('data-formula');
-                cell.removeAttribute('title');
-                cell.removeAttribute('data-formula-val');
-                cell.classList.remove('has-formula');
+            // User ONLY overwrites formula if actively typing/editing THIS SPECIFIC cell and entered non-formula plain text
+            if (isFocused && !looksLikeFormula(cleanTxt) && cleanTxt !== '') {
+              const lastVal = cell.getAttribute ? cell.getAttribute('data-formula-val') : null;
+              // If user actively changed cell content to something other than the calculated value:
+              if (lastVal !== null && cleanTxt !== lastVal) {
+                // User intentionally replaced formula with static text
+                if (cell.removeAttribute) {
+                  cell.removeAttribute('data-formula');
+                  cell.removeAttribute('title');
+                  cell.removeAttribute('data-formula-val');
+                  cell.classList.remove('has-formula');
+                }
+                const b = cell.querySelector('.formula-badge');
+                if (b) b.remove();
+                delete window._tableFormulaRegistry[regKey];
+                delete window._tableFormulaRegistry[idxKey];
+                if (editorInstance && editorInstance.model) {
+                  _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
+                }
+                continue;
               }
-              const b = cell.querySelector('.formula-badge');
-              if (b) b.remove();
-              delete window._tableFormulaRegistry[regKey];
-              if (editorInstance && editorInstance.model) {
-                _removeModelFormulaAttribute(editorInstance, tableIdx, r, c);
-              }
-              continue;
-            }
-
-            let formula = null;
-            if (cleanTxt.startsWith('=')) {
-              formula = normalizeFormulaString(cleanTxt);
-            } else if (attrFormula) {
-              formula = normalizeFormulaString(attrFormula);
             }
 
             if (formula && formula.startsWith('=')) {
               window._tableFormulaRegistry[regKey] = formula;
+              window._tableFormulaRegistry[idxKey] = formula;
               cell.setAttribute('data-formula', formula);
               cell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
               cell.classList.add('has-formula');
@@ -3648,7 +6453,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
       });
 
-      // Prune keys for cells or tables that have been removed
+      // Prune keys only for cells or tables that have actually been deleted from DOM
       for (let k in window._tableFormulaRegistry) {
         if (!validKeys.has(k)) {
           delete window._tableFormulaRegistry[k];
@@ -3657,66 +6462,84 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function getCellFormula(cell, tableIdx, r, c) {
-      if (cell && (tableIdx === undefined || r === undefined || c === undefined)) {
-        const table = cell.closest('table');
-        if (table) {
-          const liveTables = getEditorLiveTables();
-          tableIdx = liveTables.indexOf(table);
-          const row = cell.closest('tr');
-          r = row ? row.rowIndex : 0;
-          c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+      if (!cell) return null;
+      const table = cell.closest('table');
+      const tableUid = table ? getTableUid(table) : null;
+      const liveTables = getEditorLiveTables();
+      const tIdx = (tableIdx !== undefined && tableIdx !== null) ? tableIdx : (table ? Math.max(0, liveTables.indexOf(table)) : 0);
+      const row = cell.closest('tr');
+      const rIdx = (r !== undefined) ? r : (row ? row.rowIndex : 0);
+      const cIdx = (c !== undefined) ? c : (cell.cellIndex !== undefined ? cell.cellIndex : 0);
+      const regKey = tableUid ? (tableUid + '_' + rIdx + '_' + cIdx) : null;
+      const idxKey = tIdx + '_' + rIdx + '_' + cIdx;
+
+      // 1. Direct text check
+      let rawText = '';
+      for (let n of cell.childNodes) {
+        if (n.classList && n.classList.contains('formula-badge')) continue;
+        rawText += (n.innerText || n.textContent || '');
+      }
+      const directText = cleanFormulaText(rawText);
+      if (looksLikeFormula(directText)) {
+        const nf = normalizeFormulaString(directText);
+        if (regKey) window._tableFormulaRegistry[regKey] = nf;
+        window._tableFormulaRegistry[idxKey] = nf;
+        return nf;
+      }
+
+      // 2. data-formula attribute on cell or child
+      if (cell.getAttribute && cell.getAttribute('data-formula')) {
+        const nf = normalizeFormulaString(cell.getAttribute('data-formula'));
+        if (regKey) window._tableFormulaRegistry[regKey] = nf;
+        window._tableFormulaRegistry[idxKey] = nf;
+        return nf;
+      }
+      if (cell.getAttribute && cell.getAttribute('title')) {
+        const f = extractFormulaFromTitle(cell.getAttribute('title'));
+        if (f) {
+          const nf = normalizeFormulaString(f);
+          if (regKey) window._tableFormulaRegistry[regKey] = nf;
+          window._tableFormulaRegistry[idxKey] = nf;
+          return nf;
         }
       }
-      const regKey = (tableIdx !== undefined && tableIdx >= 0 && r !== undefined && c !== undefined) ? (tableIdx + '_' + r + '_' + c) : null;
-      if (cell) {
-        const directText = cleanFormulaText(cell.innerText || cell.textContent || '');
-        if (directText.startsWith('=')) {
-          const nf = normalizeFormulaString(directText);
-          if (regKey) window._tableFormulaRegistry[regKey] = nf;
-          return nf;
-        }
-        if (cell.getAttribute && cell.getAttribute('data-formula')) {
-          const nf = normalizeFormulaString(cell.getAttribute('data-formula'));
-          if (regKey) window._tableFormulaRegistry[regKey] = nf;
-          return nf;
-        }
-        if (cell.getAttribute && cell.getAttribute('title')) {
-          const f = extractFormulaFromTitle(cell.getAttribute('title'));
-          if (f) {
-            const nf = normalizeFormulaString(f);
+      if (cell.querySelector) {
+        const withFormula = cell.querySelectorAll('[data-formula]');
+        for (let i = 0; i < withFormula.length; i++) {
+          const nf = normalizeFormulaString(withFormula[i].getAttribute('data-formula'));
+          if (nf) {
             if (regKey) window._tableFormulaRegistry[regKey] = nf;
+            window._tableFormulaRegistry[idxKey] = nf;
             return nf;
           }
         }
-        if (cell.querySelector) {
-          const withFormula = cell.querySelectorAll('[data-formula]');
-          for (let i = 0; i < withFormula.length; i++) {
-            const nf = normalizeFormulaString(withFormula[i].getAttribute('data-formula'));
-            if (nf) {
-              if (regKey) window._tableFormulaRegistry[regKey] = nf;
-              return nf;
-            }
-          }
-          const withTitle = cell.querySelectorAll('[title*="Formula:"]');
-          for (let i = 0; i < withTitle.length; i++) {
-            const f = extractFormulaFromTitle(withTitle[i].getAttribute('title'));
-            if (f) {
-              const nf = normalizeFormulaString(f);
-              if (regKey) window._tableFormulaRegistry[regKey] = nf;
-              return nf;
-            }
+        const withTitle = cell.querySelectorAll('[title*="Formula:"]');
+        for (let i = 0; i < withTitle.length; i++) {
+          const f = extractFormulaFromTitle(withTitle[i].getAttribute('title'));
+          if (f) {
+            const nf = normalizeFormulaString(f);
+            if (regKey) window._tableFormulaRegistry[regKey] = nf;
+            window._tableFormulaRegistry[idxKey] = nf;
+            return nf;
           }
         }
       }
-      if (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
-        const f = window._tableFormulaRegistry[regKey];
-        if (cell) {
-          if (!cell.hasAttribute('data-formula')) cell.setAttribute('data-formula', f);
-          if (!cell.classList.contains('has-formula')) cell.classList.add('has-formula');
-          if (!cell.hasAttribute('title')) cell.setAttribute('title', 'Formula: ' + f + ' (Click fx to edit)');
+
+      // 3. Registry check (by tableUid key or by index key)
+      const regFormula = (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) ||
+                         (window._tableFormulaRegistry && window._tableFormulaRegistry[idxKey]);
+      if (regFormula) {
+        const nf = normalizeFormulaString(regFormula);
+        if (cell.setAttribute) {
+          cell.setAttribute('data-formula', nf);
+          cell.setAttribute('title', 'Formula: ' + nf + ' (Click fx to edit)');
+          cell.classList.add('has-formula');
         }
-        return f;
+        if (regKey) window._tableFormulaRegistry[regKey] = nf;
+        window._tableFormulaRegistry[idxKey] = nf;
+        return nf;
       }
+
       return null;
     }
 
@@ -3756,8 +6579,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                 if (targetCell) {
                   const currentText = _getModelCellText(targetCell);
                   const currentFormula = targetCell.getAttribute('dataFormula');
-                  // Only touch model if text or formula actually changed!
-                  if (currentText === String(resStr).trim() && currentFormula === formula) {
+                  const currentVal = targetCell.getAttribute('dataFormulaVal');
+                  // Only touch model if text, formula, or formulaVal actually changed!
+                  if (currentText === String(resStr).trim() && currentFormula === formula && currentVal === String(resStr)) {
                     return;
                   }
                   
@@ -3770,6 +6594,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     if (formula) {
                       try {
                         writer.setAttribute('dataFormula', formula, targetCell);
+                        writer.setAttribute('dataFormulaVal', String(resStr), targetCell);
                       } catch (e) {}
                     }
                   };
@@ -3841,7 +6666,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     window.ensureFormulaBadgesDOM = ensureFormulaBadgesDOM;
 
     function autoUpdateTableFormulasDOM(forceCell = null) {
-      if (window._isUpdatingFormula) return;
+      /* An explicit apply (forceCell) must not be dropped just because a background recalc ran moments ago */
+      if (window._isUpdatingFormula && !forceCell) return;
       const liveTables = getEditorLiveTables();
       if (liveTables.length === 0) return;
 
@@ -3878,9 +6704,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
             }
           }
 
-          // 3. Recalculate formula cells and update LIVE DOM (up to 2 passes for chained formulas)
+          // 3. Recalculate formula cells and update LIVE DOM (up to 3 passes for chained formulas)
           let pass = 0;
-          while (pass < 2) {
+          while (pass < 3) {
             let passUpdated = false;
             for (let r = 0; r < liveRows.length; r++) {
               for (let c = 0; c < liveRows[r].cells.length; c++) {
@@ -3899,7 +6725,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     liveCell.setAttribute('data-formula-val', resStr);
                     liveCell.classList.add('has-formula');
 
-                    let p = liveCell.querySelector('p');
+                    /* CKEditor renders a lone attribute-less paragraph in a cell as a bogus <span>, not <p> */
+                    let p = liveCell.querySelector('p, .ck-table-bogus-paragraph');
                     if (!p) {
                       p = document.createElement('p');
                       liveCell.innerHTML = '';
@@ -3941,10 +6768,11 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
                     // Update grid so chained formulas work instantly
                     grid[r][c] = resStr;
 
-                    // Keep CKEditor model in sync (non-undoable batch)
-                    // Only sync model if user is NOT actively typing in any table cell (to prevent stealing focus/caret)
-                    const isAnyCellActive = document.activeElement && document.activeElement.closest && document.activeElement.closest('table');
-                    if (editorInstance && (!isAnyCellActive || forceCell)) {
+                    // Keep CKEditor model in sync (non-undoable batch). CKEditor reverts DOM-only edits, so without
+                    // this the result never shows. The cell being typed in is skipped above, and writing another
+                    // cell does not move the caret; only avoid interrupting IME composition.
+                    const isComposing = editorInstance && editorInstance.editing.view.document.isComposing;
+                    if (editorInstance && (!isComposing || forceCell)) {
                       _syncModelFormulaCell(editorInstance, tableIdx, r, c, resStr, formula);
                     }
                   }
@@ -3961,6 +6789,15 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         setTimeout(ensureFormulaBadgesDOM, 30);
         setTimeout(ensureFormulaBadgesDOM, 100);
 
+        // 5. Update all table cell references and inline document formulas across document in real time
+        updateTableCellReferencesDOM();
+        setTimeout(updateTableCellReferencesDOM, 30);
+        setTimeout(updateTableCellReferencesDOM, 100);
+
+        updateInlineFormulasDOM();
+        setTimeout(updateInlineFormulasDOM, 30);
+        setTimeout(updateInlineFormulasDOM, 100);
+
         if (anyUpdated) {
           postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
         }
@@ -3976,9 +6813,28 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       autoUpdateTableFormulasDOM();
     }
 
-    // Live formula recalculation on any input/keyup at document level
-    document.addEventListener('input', function() { scheduleLiveFormulaRecalc(); }, true);
-    document.addEventListener('keyup', function() { scheduleLiveFormulaRecalc(); }, true);
+    // Live formula recalculation and cell reference resolution on any input/keyup at document level
+    /* Typing in a dialog (e.g. the formula bar) is not a document edit */
+    function isEventInsideModal(e) {
+      return !!(e.target && e.target.closest && e.target.closest('.modal-overlay'));
+    }
+
+    document.addEventListener('input', function(e) {
+      if (isEventInsideModal(e)) return;
+      scheduleLiveFormulaRecalc();
+      if (!e.data || e.data === ' ' || e.data === '.' || e.data === ',' || e.data === ';' || e.data === ')') {
+        checkAndResolveDirectCellRef(editorInstance);
+        checkAndResolveDirectFormula(editorInstance);
+      }
+    }, true);
+    document.addEventListener('keyup', function(e) {
+      if (isEventInsideModal(e)) return;
+      scheduleLiveFormulaRecalc();
+      if (e.key === ' ' || e.key === 'Enter' || e.key === ')') {
+        checkAndResolveDirectCellRef(editorInstance);
+        checkAndResolveDirectFormula(editorInstance);
+      }
+    }, true);
 
     // Recalculate when cell loses focus
     document.addEventListener('focusout', function(e) {
@@ -3998,9 +6854,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       try {
         const liveTables = getEditorLiveTables();
         liveTables.forEach((table, tableIdx) => {
+          const tableUid = getTableUid(table);
           for (let r = 0; r < table.rows.length; r++) {
             for (let c = 0; c < table.rows[r].cells.length; c++) {
-              const regKey = tableIdx + '_' + r + '_' + c;
+              const regKey = tableUid + '_' + r + '_' + c;
               if (window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
                 const cell = table.rows[r].cells[c];
                 const strong = cell.querySelector('strong');
@@ -4018,11 +6875,13 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
     // Recalculate on Enter/Tab in table cell
     document.addEventListener('keydown', function(e) {
+      if (!e.target || !e.target.closest || !e.target.closest('.ck-editor__editable, #fallback-content')) return;
       if (e.key === 'Enter' || e.key === 'Tab') {
-        const cell = getActiveTableCell();
+        /* The cursor's own cell, not the last cell ever clicked (that blocked Enter all over the document) */
+        const cell = getSelectionTableCell();
         if (cell) {
           const raw = cleanFormulaText(cell.innerText || cell.textContent || '');
-          if (raw.startsWith('=') && e.key === 'Enter') {
+          if (looksLikeFormula(raw) && e.key === 'Enter') {
             e.preventDefault();
             e.stopPropagation();
           }
@@ -4034,11 +6893,43 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
-    // Click on fx badge to open formula editor modal
+    // Click on fx badge or table cell reference pill
     document.addEventListener('click', function(e) {
       const cell = e.target.closest('td, th');
       if (cell) {
         lastActiveTableCell = cell;
+      }
+      // If formula modal is open, clicking a cell in any editor table inserts its coordinate into formula
+      const formulaModal = document.getElementById('formula-modal');
+      if (formulaModal && formulaModal.classList.contains('show') && cell && !cell.closest('#formula-modal')) {
+        const row = cell.closest('tr');
+        const rIdx = row ? row.rowIndex : 0;
+        const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+        const coord = getCellCoordString(cIdx, rIdx);
+        insertFormulaCellCoord(coord);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      const formulaPill = e.target.closest('.inline-formula-pill, span[data-formula]:not(td):not(th)');
+      if (formulaPill && !formulaPill.closest('.formula-badge')) {
+        e.preventDefault();
+        e.stopPropagation();
+        openInlineFormulaEditor(formulaPill);
+        return;
+      }
+      const pill = e.target.closest('.table-cell-ref, .mention, span[data-cell-coord]');
+      if (pill && (pill.classList.contains('table-cell-ref') || pill.hasAttribute('data-cell-coord') || (pill.getAttribute('data-mention') && pill.getAttribute('data-mention').indexOf('\$') === 0))) {
+        let coord = pill.getAttribute('data-cell-coord') || pill.getAttribute('data-mention') || '';
+        if (coord.indexOf('\$') === 0) coord = coord.substring(1);
+        let tableIdx = parseInt(pill.getAttribute('data-table-idx'), 10) || 0;
+        /* Legacy "T2:A1" style coordinates carry the table number themselves */
+        const tableMatch = /^T([0-9]+):(.+)\$/i.exec(coord);
+        if (tableMatch) { tableIdx = parseInt(tableMatch[1], 10) - 1; coord = tableMatch[2]; }
+        if (coord) {
+          highlightReferencedTableCell(coord, tableIdx);
+        }
+        return;
       }
       const badge = e.target.closest('.formula-badge');
       if (badge) {
@@ -4069,6 +6960,54 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
     }, true);
 
+    function isCurrentSelectionInTable() {
+      const sel = window.getSelection ? window.getSelection() : null;
+      if (sel && sel.anchorNode) {
+        const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
+        if (node && node.closest('td, th')) return true;
+      }
+      if (document.activeElement && document.activeElement.closest && document.activeElement.closest('td, th')) {
+        return true;
+      }
+      if (editorInstance && editorInstance.model) {
+        try {
+          const pos = editorInstance.model.document.selection.getFirstPosition();
+          let parent = pos ? pos.parent : null;
+          while (parent) {
+            if (parent.name === 'tableCell') return true;
+            parent = parent.parent;
+          }
+        } catch (e) {}
+      }
+      return false;
+    }
+
+    /* DOM td/th of the cell holding the editor selection (model first: the toolbar click may move DOM focus) */
+    function getSelectionTableCell() {
+      if (editorInstance && editorInstance.model) {
+        try {
+          const selection = editorInstance.model.document.selection;
+          const pos = selection.getFirstPosition();
+          let modelCell = pos ? pos.findAncestor('tableCell') : null;
+          if (!modelCell && editorInstance.plugins.has('TableUtils')) {
+            modelCell = editorInstance.plugins.get('TableUtils').getSelectionAffectedTableCells(selection)[0] || null;
+          }
+          if (modelCell) {
+            const viewCell = editorInstance.editing.mapper.toViewElement(modelCell);
+            const domCell = viewCell ? editorInstance.editing.view.domConverter.mapViewToDom(viewCell) : null;
+            if (domCell && document.contains(domCell)) return domCell;
+          }
+        } catch (e) {}
+      }
+      const sel = window.getSelection ? window.getSelection() : null;
+      if (sel && sel.anchorNode) {
+        const node = sel.anchorNode.nodeType === Node.ELEMENT_NODE ? sel.anchorNode : sel.anchorNode.parentElement;
+        const cell = node ? node.closest('td, th') : null;
+        if (cell && document.contains(cell)) return cell;
+      }
+      return null;
+    }
+
     function resolveTargetCell() {
       let cell = window._targetFormulaCell;
       if (cell && document.contains(cell)) return cell;
@@ -4086,19 +7025,22 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     function showFormulaHelpModal() {
-      let cell = resolveTargetCell();
-      if (!cell || !document.contains(cell)) {
-        const anyCell = document.querySelector('.ck-content table td, .ck-content table th, #fallback-content table td, #fallback-content table th, table td, table th');
-        if (anyCell) {
-          cell = anyCell;
-          window._targetFormulaCell = anyCell;
-          lastActiveTableCell = anyCell;
-        } else {
-          showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
+      const liveTables = getEditorLiveTables();
+      if (!liveTables || liveTables.length === 0) {
+        showToastMsg('⚠️ Please insert a table first before using formulas.');
+        return;
+      }
+
+      if (isCurrentSelectionInTable()) {
+        /* Target the cell under the cursor; the remembered cell is from the previous time the editor opened */
+        let cell = getSelectionTableCell() || resolveTargetCell();
+        if (cell && document.contains(cell)) {
+          openCellFormulaEditor(cell);
           return;
         }
       }
-      openCellFormulaEditor(cell);
+
+      openInlineFormulaEditor(window._targetInlineFormulaPill);
     }
 
     function openCellFormulaEditor(cell) {
@@ -4106,16 +7048,20 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         cell = resolveTargetCell();
       }
       if (!cell || !document.contains(cell)) {
-        showToastMsg('⚠️ Click inside a table cell first to edit or apply a formula');
+        openInlineFormulaEditor(null);
         return;
       }
+      window._formulaEditorMode = 'cell';
       window._targetFormulaCell = cell;
+      window._targetInlineFormulaPill = null;
       lastActiveTableCell = cell;
 
       const modal = document.getElementById('formula-modal');
       const input = document.getElementById('formula-editor-input');
       const coordLabel = document.getElementById('formula-cell-coord');
       const title = document.getElementById('formula-modal-title');
+      const applyBtn = document.getElementById('formula-apply-btn');
+      const clearBtn = document.getElementById('formula-clear-btn');
 
       const table = cell.closest('table');
       const liveTables = getEditorLiveTables();
@@ -4125,53 +7071,342 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       const cIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
       window._targetFormulaCoord = { tableIdx, r: rIdx, c: cIdx };
 
-      const colLetter = String.fromCharCode(65 + (cIdx % 26));
-      const coordName = colLetter + (rIdx + 1);
+      const coordName = getCellCoordString(cIdx, rIdx);
 
       const currentFormula = getCellFormula(cell, tableIdx, rIdx, cIdx) || cell.getAttribute('data-formula') || '';
-      title.textContent = '🧮 Table Formula: Cell ' + coordName;
-      coordLabel.textContent = '📍 Target Cell: ' + coordName;
-      input.value = currentFormula || '=SUM(ABOVE)';
+      if (title) title.textContent = '🧮 Table Formula: Cell ' + coordName;
+      if (coordLabel) coordLabel.textContent = '📍 Target Cell: ' + coordName;
+      if (applyBtn) applyBtn.textContent = 'Apply';
+      if (clearBtn) clearBtn.textContent = 'Clear';
+      if (input) input.value = currentFormula || (rIdx > 0 ? '=SUM(ABOVE)' : '=');
 
-      modal.classList.add('show');
-      setTimeout(() => { if (input) { input.focus(); input.select(); } }, 80);
+      // Populate interactive table cells picker grid
+      renderFormulaModalCellGrid(table, rIdx, cIdx);
+
+      // Update live preview immediately
+      updateFormulaLivePreview();
+
+      if (modal) modal.classList.add('show');
+      setTimeout(() => {
+        if (input) {
+          input.focus();
+          const len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }, 80);
     }
+    window.openCellFormulaEditor = openCellFormulaEditor;
+
+    function openInlineFormulaEditor(formulaPill) {
+      const liveTables = getEditorLiveTables();
+      if (!liveTables || liveTables.length === 0) {
+        showToastMsg('⚠️ Please insert a table first before using formulas.');
+        return;
+      }
+
+      window._formulaEditorMode = 'inline';
+      window._targetInlineFormulaPill = formulaPill || null;
+      window._targetFormulaCell = null;
+
+      const modal = document.getElementById('formula-modal');
+      const input = document.getElementById('formula-editor-input');
+      const coordLabel = document.getElementById('formula-cell-coord');
+      const title = document.getElementById('formula-modal-title');
+      const applyBtn = document.getElementById('formula-apply-btn');
+      const clearBtn = document.getElementById('formula-clear-btn');
+
+      let tableIdx = 0;
+      let currentFormula = '';
+
+      if (formulaPill) {
+        currentFormula = formulaPill.getAttribute('data-formula') || formulaPill.getAttribute('data-inline-formula') || '';
+        tableIdx = parseInt(formulaPill.getAttribute('data-table-idx'), 10) || 0;
+      }
+      window._targetFormulaCoord = { tableIdx: tableIdx, r: -1, c: -1 };
+
+      if (title) title.textContent = formulaPill ? '🧮 Edit Document Formula' : '🧮 Insert Table Formula in Text';
+      if (coordLabel) coordLabel.textContent = formulaPill ? ('📍 Formula: ' + currentFormula) : '📍 Insert Live Formula into Document';
+      if (applyBtn) applyBtn.textContent = formulaPill ? 'Update' : 'Insert Formula';
+      if (clearBtn) clearBtn.textContent = formulaPill ? 'Remove' : 'Clear';
+      if (input) input.value = currentFormula || '=SUM(A1+A2)';
+
+      const table = liveTables[tableIdx] || liveTables[0];
+      renderFormulaModalCellGrid(table, -1, -1);
+      updateFormulaLivePreview();
+
+      if (modal) modal.classList.add('show');
+      setTimeout(() => {
+        if (input) {
+          input.focus();
+          const len = input.value.length;
+          input.setSelectionRange(len, len);
+        }
+      }, 80);
+    }
+    window.openInlineFormulaEditor = openInlineFormulaEditor;
+
+    function renderFormulaModalCellGrid(table, targetR, targetC) {
+      const gridContainer = document.getElementById('formula-cells-picker-grid');
+      if (!gridContainer) return;
+      gridContainer.innerHTML = '';
+
+      if (!table || !table.rows || table.rows.length === 0) {
+        gridContainer.innerHTML = '<span style="font-size:12px;color:#94a3b8;padding:8px;">No table cells available</span>';
+        return;
+      }
+
+      for (let r = 0; r < table.rows.length; r++) {
+        const row = table.rows[r];
+        for (let c = 0; c < row.cells.length; c++) {
+          const cell = row.cells[c];
+          const coord = getCellCoordString(c, r);
+          const isTarget = (r === targetR && c === targetC);
+          const rawVal = cell.getAttribute('data-formula-val') || cleanFormulaText(cell.innerText || cell.textContent || '');
+          const hasFormula = cell.getAttribute('data-formula') != null;
+
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.style.padding = '5px 8px';
+          btn.style.borderRadius = '6px';
+          btn.style.border = isTarget ? '1.5px dashed #3b82f6' : '1px solid #cbd5e1';
+          btn.style.background = isTarget ? '#eff6ff' : '#ffffff';
+          btn.style.cursor = isTarget ? 'default' : 'pointer';
+          btn.style.display = 'flex';
+          btn.style.flexDirection = 'column';
+          btn.style.alignItems = 'flex-start';
+          btn.style.gap = '2px';
+          btn.style.textAlign = 'left';
+          btn.style.transition = 'all 0.15s ease';
+          btn.title = isTarget ? ('Target Cell ' + coord + ' (Self)') : ('Click to insert ' + coord + ' into formula');
+
+          if (!isTarget) {
+            btn.onmouseenter = function() {
+              btn.style.background = '#dbeafe';
+              btn.style.borderColor = '#2563eb';
+            };
+            btn.onmouseleave = function() {
+              btn.style.background = '#ffffff';
+              btn.style.borderColor = '#cbd5e1';
+            };
+            btn.onclick = function() {
+              insertFormulaCellCoord(coord);
+            };
+          }
+
+          const topRow = document.createElement('div');
+          topRow.style.display = 'flex';
+          topRow.style.alignItems = 'center';
+          topRow.style.justifyContent = 'space-between';
+          topRow.style.width = '100%';
+
+          const coordBadge = document.createElement('span');
+          coordBadge.style.fontWeight = '700';
+          coordBadge.style.fontSize = '11px';
+          coordBadge.style.fontFamily = 'monospace';
+          coordBadge.style.color = isTarget ? '#2563eb' : (hasFormula ? '#7c3aed' : '#0f172a');
+          coordBadge.textContent = coord + (isTarget ? ' (Target)' : '');
+
+          topRow.appendChild(coordBadge);
+
+          const valText = document.createElement('span');
+          valText.style.fontSize = '11px';
+          valText.style.color = '#475569';
+          valText.style.maxWidth = '100%';
+          valText.style.overflow = 'hidden';
+          valText.style.textOverflow = 'ellipsis';
+          valText.style.whiteSpace = 'nowrap';
+          valText.textContent = rawVal ? ('= ' + rawVal) : '(empty)';
+
+          btn.appendChild(topRow);
+          btn.appendChild(valText);
+          gridContainer.appendChild(btn);
+        }
+      }
+    }
+    window.renderFormulaModalCellGrid = renderFormulaModalCellGrid;
+
+    function insertFormulaCellCoord(coord) {
+      const input = document.getElementById('formula-editor-input');
+      if (!input) return;
+      let val = input.value || '';
+      if (!val || val.trim() === '') {
+        val = '=';
+      } else if (!val.startsWith('=')) {
+        val = '=' + val;
+      }
+
+      const start = input.selectionStart != null ? input.selectionStart : val.length;
+      const end = input.selectionEnd != null ? input.selectionEnd : val.length;
+
+      let before = val.substring(0, start);
+      const after = val.substring(end);
+
+      const trimmedBefore = before.trim();
+      if (trimmedBefore.endsWith('(') || trimmedBefore.endsWith('+') || trimmedBefore.endsWith('-') ||
+          trimmedBefore.endsWith('*') || trimmedBefore.endsWith('/') || trimmedBefore.endsWith(',') ||
+          trimmedBefore.endsWith(':') || trimmedBefore === '=') {
+        // Safe to append directly
+      } else if (trimmedBefore.length > 1) {
+        // Automatically insert '+' if user clicks two cell cards sequentially
+        before = before.trimEnd() + ' + ';
+      }
+
+      input.value = before + coord + after;
+      const newCursorPos = (before + coord).length;
+      input.focus();
+      input.setSelectionRange(newCursorPos, newCursorPos);
+      updateFormulaLivePreview();
+    }
+    window.insertFormulaCellCoord = insertFormulaCellCoord;
+
+    function insertFormulaToken(token) {
+      const input = document.getElementById('formula-editor-input');
+      if (!input) return;
+      let val = input.value || '';
+      if (!val || val.trim() === '') {
+        val = '=';
+      } else if (!val.startsWith('=')) {
+        val = '=' + val;
+      }
+
+      const start = input.selectionStart != null ? input.selectionStart : val.length;
+      const end = input.selectionEnd != null ? input.selectionEnd : val.length;
+
+      const before = val.substring(0, start);
+      const after = val.substring(end);
+
+      input.value = before + token + after;
+      const newCursorPos = (before + token).length;
+      input.focus();
+      input.setSelectionRange(newCursorPos, newCursorPos);
+      updateFormulaLivePreview();
+    }
+    window.insertFormulaToken = insertFormulaToken;
+
+    function wrapOrSetFormulaFunction(fnName) {
+      const input = document.getElementById('formula-editor-input');
+      if (!input) return;
+      let val = (input.value || '').trim();
+      if (val.startsWith('=')) val = val.substring(1).trim();
+
+      if (!val || val === 'SUM(ABOVE)' || val === 'AVG(ABOVE)') {
+        input.value = '=' + fnName + '()';
+        const insidePos = ('=' + fnName + '(').length;
+        input.focus();
+        input.setSelectionRange(insidePos, insidePos);
+      } else if (/^[A-Z]+\\s*\\(/.test(val) && val.indexOf(')') !== -1) {
+        input.value = '=' + val.replace(/^[A-Z]+/i, fnName);
+        input.focus();
+      } else {
+        input.value = '=' + fnName + '(' + val + ')';
+        input.focus();
+      }
+      updateFormulaLivePreview();
+    }
+    window.wrapOrSetFormulaFunction = wrapOrSetFormulaFunction;
+
+    function updateFormulaLivePreview() {
+      const input = document.getElementById('formula-editor-input');
+      const previewEl = document.getElementById('formula-live-preview-val');
+      if (!input || !previewEl) return;
+
+      const raw = (input.value || '').trim();
+      if (!raw || raw === '=') {
+        previewEl.textContent = '--';
+        previewEl.style.color = '#94a3b8';
+        return;
+      }
+
+      const liveTables = getEditorLiveTables();
+      let table = null;
+      let targetR = -1;
+      let targetC = -1;
+
+      if (window._formulaEditorMode === 'cell') {
+        const cell = resolveTargetCell();
+        table = cell ? cell.closest('table') : null;
+        const row = cell ? cell.closest('tr') : null;
+        targetR = row ? row.rowIndex : (window._targetFormulaCoord ? window._targetFormulaCoord.r : 0);
+        targetC = cell ? (cell.cellIndex !== undefined ? cell.cellIndex : 0) : (window._targetFormulaCoord ? window._targetFormulaCoord.c : 0);
+      } else {
+        const tIdx = (window._targetFormulaCoord && window._targetFormulaCoord.tableIdx !== undefined) ? window._targetFormulaCoord.tableIdx : 0;
+        table = liveTables[tIdx] || liveTables[0];
+      }
+
+      if (!table) {
+        previewEl.textContent = '(Select table/cell)';
+        previewEl.style.color = '#94a3b8';
+        return;
+      }
+
+      const grid = [];
+      for (let r = 0; r < table.rows.length; r++) {
+        grid[r] = [];
+        for (let c = 0; c < table.rows[r].cells.length; c++) {
+          const curCell = table.rows[r].cells[c];
+          grid[r][c] = curCell.getAttribute('data-formula-val') || cleanFormulaText(curCell.innerText || curCell.textContent || '');
+        }
+      }
+
+      const normalized = normalizeFormulaString(raw);
+      const res = evaluateFormulaString(normalized, grid, targetR, targetC);
+
+      if (res !== null && !isNaN(res)) {
+        previewEl.textContent = '= ' + String(res);
+        previewEl.style.color = '#16a34a';
+      } else {
+        previewEl.textContent = '⚠️ Waiting for complete formula';
+        previewEl.style.color = '#eab308';
+      }
+    }
+    window.updateFormulaLivePreview = updateFormulaLivePreview;
 
     function setFormulaInput(val) {
       const input = document.getElementById('formula-editor-input');
       if (input) {
         input.value = val;
         input.focus();
+        updateFormulaLivePreview();
       }
     }
+    window.setFormulaInput = setFormulaInput;
 
     function applyCurrentCellFormula() {
       const input = document.getElementById('formula-editor-input');
       const rawVal = (input ? input.value : '').trim();
-      if (!rawVal) {
-        showToastMsg('⚠️ Please enter a formula (e.g. =SUM(ABOVE) or =A1+B1)');
+      if (!rawVal || rawVal === '=') {
+        showToastMsg('⚠️ Please enter a formula (e.g. =SUM(A1+A2) or =A1*B1)');
         return;
       }
       const formula = normalizeFormulaString(rawVal);
-      const cell = resolveTargetCell();
-      if (!cell || !document.contains(cell)) {
-        showToastMsg('⚠️ Target cell not found. Please click inside the cell first.');
-        closeFormulaHelpModal();
+
+      if (window._formulaEditorMode === 'inline') {
+        applyInlineFormula(formula);
         return;
       }
-      cell.setAttribute('data-formula', formula);
-      cell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
-      cell.classList.add('has-formula');
 
-      // Update registry
+      const cell = resolveTargetCell();
+      if (!cell || !document.contains(cell)) {
+        applyInlineFormula(formula);
+        return;
+      }
+
       const table = cell.closest('table');
+      const tableUid = getTableUid(table);
       const liveTables = getEditorLiveTables();
       const tableIdx = Math.max(0, liveTables.indexOf(table));
       const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
       const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
-      const regKey = tableIdx + '_' + r + '_' + c;
+      const regKey = tableUid + '_' + r + '_' + c;
+      const idxKey = tableIdx + '_' + r + '_' + c;
+
       window._tableFormulaRegistry = window._tableFormulaRegistry || {};
       window._tableFormulaRegistry[regKey] = formula;
+      window._tableFormulaRegistry[idxKey] = formula;
+
+      cell.setAttribute('data-formula', formula);
+      cell.setAttribute('title', 'Formula: ' + formula + ' (Click fx to edit)');
+      cell.classList.add('has-formula');
 
       closeFormulaHelpModal();
       autoUpdateTableFormulasDOM(cell);
@@ -4181,18 +7416,68 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       showToastMsg('⚡ Formula applied: ' + formula);
       postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
     }
+    window.applyCurrentCellFormula = applyCurrentCellFormula;
+
+    function applyInlineFormula(formula) {
+      const liveTables = getEditorLiveTables();
+      if (!liveTables || liveTables.length === 0) {
+        showToastMsg('⚠️ Please insert a table first');
+        closeFormulaHelpModal();
+        return;
+      }
+      const tIdx = (window._targetFormulaCoord && window._targetFormulaCoord.tableIdx !== undefined) ? window._targetFormulaCoord.tableIdx : 0;
+      const table = liveTables[tIdx] || liveTables[0];
+      const grid = [];
+      for (let r = 0; r < table.rows.length; r++) {
+        grid[r] = [];
+        for (let c = 0; c < table.rows[r].cells.length; c++) {
+          const curCell = table.rows[r].cells[c];
+          grid[r][c] = curCell.getAttribute('data-formula-val') || cleanFormulaText(curCell.innerText || curCell.textContent || '');
+        }
+      }
+
+      const res = evaluateFormulaString(formula, grid, -1, -1);
+      const displayVal = (res !== null && !isNaN(res)) ? String(res) : formula;
+
+      insertOrUpdateInlineFormula(formula, displayVal, window._targetInlineFormulaPill, tIdx);
+      closeFormulaHelpModal();
+      showToastMsg('⚡ Inserted formula: ' + formula + ' (= ' + displayVal + ')');
+    }
+    window.applyInlineFormula = applyInlineFormula;
 
     function clearCurrentCellFormula() {
+      if (window._formulaEditorMode === 'inline') {
+        const pill = window._targetInlineFormulaPill;
+        if (pill) {
+          if (pill.parentNode) {
+            const textNode = document.createTextNode(pill.textContent || '');
+            pill.parentNode.replaceChild(textNode, pill);
+          }
+          if (editorInstance && editorInstance.model) {
+            updateInlineFormulasDOM();
+          }
+          showToastMsg('🗑 Formula removed; converted to static text');
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        }
+        const input = document.getElementById('formula-editor-input');
+        if (input) input.value = '';
+        closeFormulaHelpModal();
+        return;
+      }
+
       const cell = resolveTargetCell();
       if (cell && document.contains(cell)) {
         const table = cell.closest('table');
+        const tableUid = getTableUid(table);
         const liveTables = getEditorLiveTables();
         const tableIdx = Math.max(0, liveTables.indexOf(table));
         const r = cell.closest('tr') ? cell.closest('tr').rowIndex : 0;
         const c = cell.cellIndex !== undefined ? cell.cellIndex : 0;
-        const regKey = tableIdx + '_' + r + '_' + c;
+        const regKey = tableUid + '_' + r + '_' + c;
+        const idxKey = tableIdx + '_' + r + '_' + c;
         if (window._tableFormulaRegistry) {
           delete window._tableFormulaRegistry[regKey];
+          delete window._tableFormulaRegistry[idxKey];
         }
         cell.removeAttribute('data-formula');
         cell.removeAttribute('title');
@@ -4214,10 +7499,880 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
       closeFormulaHelpModal();
     }
+    window.clearCurrentCellFormula = clearCurrentCellFormula;
 
     function closeFormulaHelpModal() {
-      document.getElementById('formula-modal').classList.remove('show');
+      const modal = document.getElementById('formula-modal');
+      if (modal) modal.classList.remove('show');
     }
+    window.closeFormulaHelpModal = closeFormulaHelpModal;
+
+    /* ====== TABLE CELL REFERENCE SYSTEM ====== */
+
+    function getCellCoordString(colIdx, rowIdx) {
+      let colLetters = '';
+      let c = colIdx + 1;
+      while (c > 0) {
+        let rem = (c - 1) % 26;
+        colLetters = String.fromCharCode(65 + rem) + colLetters;
+        c = Math.floor((c - 1) / 26);
+      }
+      return colLetters + (rowIdx + 1);
+    }
+
+    function getTableCellMentionsFeed(queryText) {
+      const liveTables = getEditorLiveTables();
+      if (!liveTables || liveTables.length === 0) return [];
+
+      const query = (queryText || '').trim().toLowerCase();
+      const items = [];
+
+      liveTables.forEach((table, tIdx) => {
+        const rows = table.rows;
+        if (!rows || rows.length === 0) return;
+
+        for (let r = 0; r < rows.length; r++) {
+          const cells = rows[r].cells;
+          for (let c = 0; c < cells.length; c++) {
+            const cell = cells[c];
+            const coord = getCellCoordString(c, r);
+            const cellText = cleanFormulaText(cell.innerText || cell.textContent || '');
+            const formula = cell.getAttribute('data-formula');
+            const formulaVal = cell.getAttribute('data-formula-val');
+            const displayVal = (formulaVal != null && formulaVal !== '') ? formulaVal : (cellText || formula || '');
+
+            let headerLabel = '';
+            if (r > 0 && rows[0].cells[c]) {
+              headerLabel = cleanFormulaText(rows[0].cells[c].innerText || '');
+            }
+            let rowLabel = '';
+            if (c > 0 && rows[r].cells[0]) {
+              rowLabel = cleanFormulaText(rows[r].cells[0].innerText || '');
+            }
+
+            const shortId = '\$' + coord;
+            const fullId = (liveTables.length > 1 ? ('\$T' + (tIdx + 1) + ':' + coord) : shortId);
+
+            if (query) {
+              const matchCoord = coord.toLowerCase().includes(query) || shortId.toLowerCase().includes(query);
+              const matchVal = displayVal.toLowerCase().includes(query);
+              const matchHeader = headerLabel.toLowerCase().includes(query);
+              const matchRow = rowLabel.toLowerCase().includes(query);
+              if (!matchCoord && !matchVal && !matchHeader && !matchRow) {
+                continue;
+              }
+            }
+
+            items.push({
+              id: shortId,
+              fullId: fullId,
+              coord: coord,
+              tableIdx: tIdx,
+              r: r,
+              c: c,
+              val: displayVal,
+              header: headerLabel,
+              rowLabel: rowLabel,
+              text: displayVal || shortId
+            });
+          }
+        }
+      });
+
+      return items.slice(0, 35);
+    }
+
+    function renderTableCellMentionItem(item) {
+      const btn = document.createElement('button');
+      btn.className = 'ck-button table-cell-mention-btn';
+      btn.type = 'button';
+
+      const left = document.createElement('div');
+      left.style.display = 'flex';
+      left.style.alignItems = 'center';
+      left.style.gap = '6px';
+      left.style.overflow = 'hidden';
+
+      const badge = document.createElement('span');
+      badge.className = 'cell-coord-badge';
+      badge.textContent = item.coord;
+
+      const val = document.createElement('span');
+      val.className = 'cell-val-text';
+      val.textContent = item.val || '(empty)';
+
+      left.appendChild(badge);
+      left.appendChild(val);
+      btn.appendChild(left);
+
+      if (item.header || item.rowLabel) {
+        const meta = document.createElement('span');
+        meta.className = 'cell-meta-text';
+        meta.textContent = item.header ? ('Col: ' + item.header) : ('Row: ' + item.rowLabel);
+        btn.appendChild(meta);
+      }
+
+      return btn;
+    }
+
+    function updateTableCellReferencesDOM() {
+      try {
+        const liveTables = getEditorLiveTables();
+        if (!liveTables || liveTables.length === 0) return;
+
+        // 1. If CKEditor is active, update references via model transactions (non-undoable batch)
+        if (editorInstance && editorInstance.model) {
+          try {
+            const model = editorInstance.model;
+            const root = model.document.getRoot();
+            if (root) {
+              const refItems = [];
+              const scanModel = (parent) => {
+                for (const child of parent.getChildren()) {
+                  if (child.is && child.is('\$text')) {
+                    const ref = child.getAttribute('tableCellRef');
+                    const mention = child.getAttribute('mention');
+                    let coord = '';
+                    let tIdx = 0;
+                    if (ref) {
+                      coord = typeof ref === 'string' ? ref : (ref.coord || '');
+                      tIdx = typeof ref === 'object' && ref.tableIdx !== undefined ? ref.tableIdx : 0;
+                    } else if (mention && (mention.coord || (mention.id && mention.id.indexOf('\$') === 0))) {
+                      coord = mention.coord || mention.id.replace('\$', '').toUpperCase();
+                      tIdx = mention.tableIdx || 0;
+                    }
+                    if (coord) {
+                      refItems.push({
+                        item: child,
+                        coord: coord.toUpperCase(),
+                        tableIdx: tIdx
+                      });
+                    }
+                  } else if (child.getChildren) {
+                    scanModel(child);
+                  }
+                }
+              };
+              scanModel(root);
+
+              const toUpdate = [];
+              for (const entry of refItems) {
+                const table = liveTables[entry.tableIdx] || liveTables[0];
+                if (!table) continue;
+                const pos = parseCellCoord(entry.coord);
+                if (!pos) continue;
+
+                if (pos.row >= 0 && pos.row < table.rows.length && pos.col >= 0 && pos.col < table.rows[pos.row].cells.length) {
+                  const cell = table.rows[pos.row].cells[pos.col];
+                  const formulaVal = cell.getAttribute('data-formula-val');
+                  const freshVal = (formulaVal != null && formulaVal !== '') 
+                      ? formulaVal 
+                      : cleanFormulaText(cell.innerText || cell.textContent || '');
+
+                  if (freshVal && entry.item.data !== freshVal) {
+                    toUpdate.push({
+                      item: entry.item,
+                      coord: entry.coord,
+                      tableIdx: entry.tableIdx,
+                      freshVal: freshVal
+                    });
+                  }
+                }
+              }
+
+              if (toUpdate.length > 0) {
+                // Apply updates in reverse order so position shifts don't affect previous items
+                toUpdate.reverse();
+                const updateWriter = (writer) => {
+                  for (const u of toUpdate) {
+                    const range = writer.createRangeOn(u.item);
+                    const attrs = {};
+                    for (const [k, v] of u.item.getAttributes()) {
+                      attrs[k] = v;
+                    }
+                    attrs.tableCellRef = { coord: u.coord, tableIdx: u.tableIdx };
+                    // Ensure volatile mention attribute is not present so built-in post-fixer never interferes
+                    delete attrs.mention;
+                    writer.remove(range);
+                    writer.insertText(u.freshVal, attrs, range.start);
+                  }
+                };
+
+                let batch = null;
+                if (typeof model.createBatch === 'function') {
+                  try { batch = model.createBatch({ isUndoable: false }); } catch (e) { batch = null; }
+                }
+                if (batch && typeof model.enqueueChange === 'function') {
+                  model.enqueueChange(batch, updateWriter);
+                } else if (typeof model.change === 'function') {
+                  model.change(updateWriter);
+                }
+              }
+            }
+          } catch (modelErr) {
+            console.warn('updateModelCellReferences error:', modelErr);
+          }
+        }
+
+        // 2. Ensure all DOM spans have the proper class, data attributes and titles
+        const allSpans = Array.from(document.querySelectorAll('.ck-content .mention, .ck-content .table-cell-ref, .ck-content span[data-cell-coord], #fallback-content .table-cell-ref, #fallback-content .mention, #fallback-content span[data-cell-coord]'));
+        const refSpans = allSpans.filter(s => s.classList.contains('table-cell-ref') || s.hasAttribute('data-cell-coord') || (s.getAttribute('data-mention') && s.getAttribute('data-mention').indexOf('\$') === 0));
+
+        refSpans.forEach(span => {
+          let rawCoord = span.getAttribute('data-cell-coord');
+          let tIdx = 0;
+          if (!rawCoord) {
+            const mentionId = span.getAttribute('data-mention') || '';
+            if (mentionId.indexOf('\$') === 0) {
+              let cleanId = mentionId.substring(1);
+              if (cleanId.toUpperCase().indexOf('T') === 0 && cleanId.indexOf(':') !== -1) {
+                const parts = cleanId.split(':');
+                tIdx = parseInt(parts[0].substring(1), 10) - 1 || 0;
+                cleanId = parts[1];
+              }
+              rawCoord = cleanId.toUpperCase();
+            }
+          } else {
+            const tAttr = span.getAttribute('data-table-idx');
+            if (tAttr) tIdx = parseInt(tAttr, 10);
+          }
+
+          if (!rawCoord) return;
+
+          if (!span.classList.contains('table-cell-ref')) {
+            span.classList.add('table-cell-ref');
+          }
+          span.setAttribute('data-cell-coord', rawCoord);
+          span.setAttribute('data-table-idx', tIdx);
+          if (!span.getAttribute('data-mention')) {
+            const token = '\$' + (tIdx > 0 ? ('T' + (tIdx + 1) + ':' + rawCoord) : rawCoord);
+            span.setAttribute('data-mention', token);
+          }
+
+          const table = liveTables[tIdx] || liveTables[0];
+          if (!table) return;
+
+          const pos = parseCellCoord(rawCoord);
+          if (!pos) return;
+
+          if (pos.row >= 0 && pos.row < table.rows.length && pos.col >= 0 && pos.col < table.rows[pos.row].cells.length) {
+            const cell = table.rows[pos.row].cells[pos.col];
+            const formulaVal = cell.getAttribute('data-formula-val');
+            const freshVal = (formulaVal != null && formulaVal !== '') 
+                ? formulaVal 
+                : cleanFormulaText(cell.innerText || cell.textContent || '');
+
+            span.setAttribute('title', 'Table cell ' + rawCoord + ': "' + (freshVal || '') + '" (Live Link)');
+
+            // For fallback mode or if editorInstance is not managing this DOM node
+            if (isFallback || !editorInstance) {
+              const currentText = (span.innerText || span.textContent || '').trim();
+              if (freshVal && currentText !== freshVal) {
+                span.textContent = freshVal;
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('updateTableCellReferencesDOM error:', e);
+      }
+    }
+    window.updateTableCellReferencesDOM = updateTableCellReferencesDOM;
+
+    function _syncModelMentionText(editor, spanElement, newText) {
+      // Handled cleanly via model traversal in updateTableCellReferencesDOM
+      if (!editor || !editor.model) return;
+      const liveTables = getEditorLiveTables();
+      if (liveTables && liveTables.length > 0) {
+        updateTableCellReferencesDOM();
+      }
+    }
+
+    function checkAndResolveDirectCellRef(editor) {
+      if (!editor || !editor.model) return;
+      try {
+        const liveTables = getEditorLiveTables();
+        if (liveTables.length === 0) return;
+
+        const model = editor.model;
+        const sel = model.document.selection;
+        if (!sel.isCollapsed) return;
+
+        const pos = sel.getFirstPosition();
+        const parent = pos.parent;
+        if (!parent || parent.name === 'tableCell' || parent.name === 'codeBlock') return;
+
+        for (const child of parent.getChildren()) {
+          if (child.is && child.is('\$text') && !child.getAttribute('tableCellRef')) {
+            const text = child.data;
+            const regex = /(?:^|\\s)\$([A-Za-z]+[0-9]+)/g;
+            let match;
+            while ((match = regex.exec(text)) !== null) {
+              const afterIdx = match.index + match[0].length;
+              if (afterIdx < text.length && !/[\\s,.;:!?]/.test(text[afterIdx])) continue;
+
+              const coord = match[1].toUpperCase();
+              const fullMatch = '\$' + match[1];
+              const matchIndex = match.index + (match[0].startsWith(' ') ? 1 : 0);
+
+              const parsed = parseCellCoord(coord);
+              if (!parsed) continue;
+
+              const table = liveTables[0];
+              if (parsed.row >= 0 && parsed.row < table.rows.length && parsed.col >= 0 && parsed.col < table.rows[parsed.row].cells.length) {
+                const cell = table.rows[parsed.row].cells[parsed.col];
+                const formulaVal = cell.getAttribute('data-formula-val');
+                const val = (formulaVal != null && formulaVal !== '') 
+                    ? formulaVal 
+                    : cleanFormulaText(cell.innerText || cell.textContent || '') || fullMatch;
+
+                model.change(writer => {
+                  const startPos = writer.createPositionAt(child, matchIndex);
+                  const endPos = writer.createPositionAt(child, matchIndex + fullMatch.length);
+                  const range = writer.createRange(startPos, endPos);
+                  writer.remove(range);
+                  const refText = writer.createText(val, {
+                    tableCellRef: {
+                      coord: coord,
+                      tableIdx: 0
+                    }
+                  });
+                  writer.insert(refText, startPos);
+                });
+                setTimeout(updateTableCellReferencesDOM, 10);
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('checkAndResolveDirectCellRef error:', e);
+      }
+    }
+
+    function checkAndResolveDirectFormula(editor) {
+      if (!editor || !editor.model) return;
+      try {
+        const liveTables = getEditorLiveTables();
+        if (liveTables.length === 0) return;
+
+        const model = editor.model;
+        const sel = model.document.selection;
+        if (!sel.isCollapsed) return;
+
+        const pos = sel.getFirstPosition();
+        const parent = pos.parent;
+        if (!parent || parent.name === 'tableCell' || parent.name === 'codeBlock') return;
+
+        const table = liveTables[0];
+        const grid = [];
+        for (let r = 0; r < table.rows.length; r++) {
+          grid[r] = [];
+          for (let c = 0; c < table.rows[r].cells.length; c++) {
+            const curCell = table.rows[r].cells[c];
+            grid[r][c] = curCell.getAttribute('data-formula-val') || cleanFormulaText(curCell.innerText || curCell.textContent || '');
+          }
+        }
+
+        // Pattern 1: A single text node containing typed formula (e.g. =SUM(A1+A2) or =\$A1+\$A2 or =A1*1.5)
+        for (const child of parent.getChildren()) {
+          if (child.is && child.is('\$text') && !child.getAttribute('inlineFormula') && !child.getAttribute('tableCellRef')) {
+            const text = child.data;
+            const fRegex = /(?:^|\\s)(=(?:(?:SUM|AVG|AVERAGE|COUNT|MAX|MIN|PRODUCT|ROUND)\\s*\\([^)]+\\)|(?:\\\$?[A-Za-z]+[0-9]+)\\s*(?:[\\+\\-\\*\\/]\\s*(?:\\\$?[A-Za-z]+[0-9]+|\\d+(?:\\.\\d+)?))+))/gi;
+            let match;
+            while ((match = fRegex.exec(text)) !== null) {
+              const afterIdx = match.index + match[0].length;
+              if (afterIdx < text.length && !/[\\s,.;:!?]/.test(text[afterIdx])) continue;
+
+              const formulaRaw = match[1].trim();
+              const matchIndex = match.index + (match[0].startsWith(' ') ? 1 : 0);
+
+              const res = evaluateFormulaString(formulaRaw, grid, -1, -1);
+              if (res !== null && !isNaN(res)) {
+                const displayVal = String(res);
+                model.change(writer => {
+                  const startPos = writer.createPositionAt(child, matchIndex);
+                  const endPos = writer.createPositionAt(child, matchIndex + formulaRaw.length);
+                  const range = writer.createRange(startPos, endPos);
+                  writer.remove(range);
+                  const formulaText = writer.createText(displayVal, {
+                    inlineFormula: {
+                      formula: formulaRaw,
+                      tableIdx: 0
+                    }
+                  });
+                  writer.insert(formulaText, startPos);
+                });
+                setTimeout(updateInlineFormulasDOM, 10);
+                return;
+              }
+            }
+          }
+        }
+
+        // Pattern 2: Sequence of siblings where user typed `= SUM( [📊 23] + [📊 33] )`
+        const children = Array.from(parent.getChildren());
+        for (let i = 0; i < children.length; i++) {
+          const startNode = children[i];
+          if (startNode.is && startNode.is('\$text') && !startNode.getAttribute('inlineFormula') && !startNode.getAttribute('tableCellRef')) {
+            const text = startNode.data;
+            const eqIdx = text.lastIndexOf('=');
+            if (eqIdx !== -1) {
+              let formulaParts = [text.substring(eqIdx)];
+              let endNode = startNode;
+              let endOffset = text.length;
+              let hasCellRef = false;
+              let isComplete = false;
+
+              for (let j = i + 1; j < children.length; j++) {
+                const nextNode = children[j];
+                if (nextNode.is && nextNode.is('\$text')) {
+                  const ref = nextNode.getAttribute('tableCellRef');
+                  if (ref) {
+                    hasCellRef = true;
+                    formulaParts.push(ref.coord || 'A1');
+                    endNode = nextNode;
+                    endOffset = nextNode.data.length;
+                  } else if (!nextNode.getAttribute('inlineFormula')) {
+                    formulaParts.push(nextNode.data);
+                    endNode = nextNode;
+                    endOffset = nextNode.data.length;
+                    if (nextNode.data.includes(')')) {
+                      isComplete = true;
+                      endOffset = nextNode.data.indexOf(')') + 1;
+                      break;
+                    }
+                  } else {
+                    break;
+                  }
+                } else {
+                  break;
+                }
+              }
+
+              if (hasCellRef && (isComplete || formulaParts.join('').includes('+') || formulaParts.join('').includes('-') || formulaParts.join('').includes('*'))) {
+                const combinedFormula = formulaParts.join('').trim();
+                const res = evaluateFormulaString(combinedFormula, grid, -1, -1);
+                if (res !== null && !isNaN(res)) {
+                  const displayVal = String(res);
+                  model.change(writer => {
+                    const startPos = writer.createPositionAt(startNode, eqIdx);
+                    const endPos = writer.createPositionAt(endNode, endOffset);
+                    const range = writer.createRange(startPos, endPos);
+                    writer.remove(range);
+                    const formulaText = writer.createText(displayVal, {
+                      inlineFormula: {
+                        formula: combinedFormula,
+                        tableIdx: 0
+                      }
+                    });
+                    writer.insert(formulaText, startPos);
+                  });
+                  setTimeout(updateInlineFormulasDOM, 10);
+                  return;
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('checkAndResolveDirectFormula error:', e);
+      }
+    }
+    window.checkAndResolveDirectFormula = checkAndResolveDirectFormula;
+
+    function insertOrUpdateInlineFormula(formula, displayVal, targetPill, tableIdx) {
+      if (tableIdx === undefined || tableIdx === null) tableIdx = 0;
+      if (!formula.startsWith('=')) formula = '=' + formula;
+
+      if (editorInstance && editorInstance.model) {
+        try {
+          editorInstance.model.change(writer => {
+            const formulaData = {
+              formula: formula,
+              tableIdx: tableIdx
+            };
+            const sel = editorInstance.model.document.selection;
+            const textNode = writer.createText(displayVal, {
+              inlineFormula: formulaData
+            });
+            editorInstance.model.insertContent(textNode, sel);
+            editorInstance.model.insertContent(writer.createText(' '), sel);
+          });
+          setTimeout(updateInlineFormulasDOM, 20);
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+          return;
+        } catch (e) {
+          console.warn('insertOrUpdateInlineFormula model error:', e);
+        }
+      }
+
+      // Fallback mode or fallback DOM:
+      const pillHtml = '<span class="inline-formula-pill" data-formula="' + formula + '" data-table-idx="' + tableIdx + '" title="Formula: ' + formula + ' (Live Calculation)">' + displayVal + '</span>&nbsp;';
+      if (targetPill && targetPill.parentNode) {
+        targetPill.outerHTML = pillHtml;
+      } else {
+        document.execCommand('insertHTML', false, pillHtml);
+      }
+      postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+    }
+    window.insertOrUpdateInlineFormula = insertOrUpdateInlineFormula;
+
+    function updateInlineFormulasDOM() {
+      try {
+        const liveTables = getEditorLiveTables();
+        if (!liveTables || liveTables.length === 0) return;
+
+        // Build grids for each table
+        const grids = liveTables.map(t => {
+          const g = [];
+          for (let r = 0; r < t.rows.length; r++) {
+            g[r] = [];
+            for (let c = 0; c < t.rows[r].cells.length; c++) {
+              const curCell = t.rows[r].cells[c];
+              g[r][c] = curCell.getAttribute('data-formula-val') || cleanFormulaText(curCell.innerText || curCell.textContent || '');
+            }
+          }
+          return g;
+        });
+
+        // 1. Update CKEditor Model
+        if (editorInstance && editorInstance.model) {
+          const model = editorInstance.model;
+          const root = model.document.getRoot();
+          if (root) {
+            const formulaItems = [];
+            const scanModel = (parent) => {
+              for (const child of parent.getChildren()) {
+                if (child.is && child.is('\$text')) {
+                  const inf = child.getAttribute('inlineFormula');
+                  if (inf) {
+                    const formula = typeof inf === 'string' ? inf : (inf.formula || '');
+                    const tIdx = (typeof inf === 'object' && inf.tableIdx !== undefined) ? inf.tableIdx : 0;
+                    if (formula) {
+                      formulaItems.push({ item: child, formula: formula, tableIdx: tIdx });
+                    }
+                  }
+                } else if (child.getChildren) {
+                  scanModel(child);
+                }
+              }
+            };
+            scanModel(root);
+
+            const toUpdate = [];
+            for (const entry of formulaItems) {
+              const grid = grids[entry.tableIdx] || grids[0];
+              if (!grid) continue;
+              const res = evaluateFormulaString(entry.formula, grid, -1, -1);
+              if (res !== null && !isNaN(res)) {
+                const freshVal = String(res);
+                if (entry.item.data !== freshVal) {
+                  toUpdate.push({
+                    item: entry.item,
+                    formula: entry.formula,
+                    tableIdx: entry.tableIdx,
+                    freshVal: freshVal
+                  });
+                }
+              }
+            }
+
+            if (toUpdate.length > 0) {
+              toUpdate.reverse();
+              const updateWriter = (writer) => {
+                for (const u of toUpdate) {
+                  const range = writer.createRangeOn(u.item);
+                  const attrs = {};
+                  for (const [k, v] of u.item.getAttributes()) {
+                    attrs[k] = v;
+                  }
+                  attrs.inlineFormula = { formula: u.formula, tableIdx: u.tableIdx };
+                  writer.remove(range);
+                  writer.insertText(u.freshVal, attrs, range.start);
+                }
+              };
+
+              let batch = null;
+              if (typeof model.createBatch === 'function') {
+                try { batch = model.createBatch({ isUndoable: false }); } catch (e) { batch = null; }
+              }
+              if (batch && typeof model.enqueueChange === 'function') {
+                model.enqueueChange(batch, updateWriter);
+              } else if (typeof model.change === 'function') {
+                model.change(updateWriter);
+              }
+            }
+          }
+        }
+
+        // 2. Also ensure DOM spans have correct class, data-formula, and titles
+        const allFormulaSpans = Array.from(document.querySelectorAll('.ck-content .inline-formula-pill, .ck-content span[data-formula], #fallback-content .inline-formula-pill, #fallback-content span[data-formula]'));
+        allFormulaSpans.forEach(span => {
+          if (span.closest('td, th')) return;
+
+          const formula = span.getAttribute('data-formula') || span.getAttribute('data-inline-formula');
+          if (!formula) return;
+
+          let tIdx = parseInt(span.getAttribute('data-table-idx'), 10) || 0;
+          const grid = grids[tIdx] || grids[0];
+          if (!grid) return;
+
+          const res = evaluateFormulaString(formula, grid, -1, -1);
+          if (res !== null && !isNaN(res)) {
+            const freshVal = String(res);
+            span.setAttribute('title', 'Formula: ' + formula + ' = ' + freshVal + ' (Live Calculation - Click to edit)');
+            if (isFallback || !editorInstance) {
+              const curText = (span.innerText || span.textContent || '').trim();
+              if (curText !== freshVal) {
+                span.textContent = freshVal;
+              }
+            }
+          }
+        });
+      } catch (e) {
+        console.warn('updateInlineFormulasDOM error:', e);
+      }
+    }
+    window.updateInlineFormulasDOM = updateInlineFormulasDOM;
+
+    let cellRefHighlight = null;
+    function highlightReferencedTableCell(coord, tableIdx) {
+      const pos = parseCellCoord(coord);
+      if (!pos) return;
+      const liveTables = getEditorLiveTables();
+      const tIdx = tableIdx || 0;
+      const table = liveTables && liveTables[tIdx];
+      const cell = table && table.rows[pos.row] ? table.rows[pos.row].cells[pos.col] : null;
+      /* One overlay at a time; it follows the cell while the smooth scroll runs */
+      if (cellRefHighlight) { cancelAnimationFrame(cellRefHighlight.frame); cellRefHighlight.el.remove(); cellRefHighlight = null; }
+      if (!cell) {
+        showToastMsg('⚠️ Cell ' + coord + ' was not found in table ' + (tIdx + 1));
+        return;
+      }
+      cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      const el = document.createElement('div');
+      el.className = 'cell-ref-highlight-overlay';
+      document.body.appendChild(el);
+      const scroller = getEditorScrollContainer(cell);
+      const until = performance.now() + 2600;
+      const state = { el: el, frame: 0 };
+      cellRefHighlight = state;
+      const follow = () => {
+        if (!document.contains(cell) || performance.now() > until) {
+          el.style.opacity = '0';
+          setTimeout(() => el.remove(), 300);
+          if (cellRefHighlight === state) cellRefHighlight = null;
+          return;
+        }
+        const r = cell.getBoundingClientRect();
+        const clip = scroller && scroller !== document.scrollingElement ? scroller.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+        const top = Math.max(r.top, clip.top);
+        const bottom = Math.min(r.bottom, clip.bottom);
+        el.style.display = bottom > top ? 'block' : 'none';
+        el.style.left = r.left + 'px';
+        el.style.top = top + 'px';
+        el.style.width = r.width + 'px';
+        el.style.height = Math.max(0, bottom - top) + 'px';
+        state.frame = requestAnimationFrame(follow);
+      };
+      follow();
+      showToastMsg('📍 Linked table cell ' + coord + ' highlighted');
+    }
+
+    // Modal picker implementation
+    function showCellRefModal() {
+      const liveTables = getEditorLiveTables();
+      if (!liveTables || liveTables.length === 0) {
+        showToastMsg('⚠️ Please insert a table first before referencing cells.');
+        return;
+      }
+      const select = document.getElementById('cell-ref-table-select');
+      if (select) {
+        select.innerHTML = '';
+        liveTables.forEach((t, i) => {
+          const opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = 'Table ' + (i + 1) + ' (' + t.rows.length + ' rows × ' + (t.rows[0] ? t.rows[0].cells.length : 0) + ' cols)';
+          select.appendChild(opt);
+        });
+      }
+      renderCellRefPickerGrid();
+      const modal = document.getElementById('cell-ref-modal');
+      modal.classList.add('show');
+      setTimeout(() => {
+        const search = document.getElementById('cell-ref-search');
+        if (search) search.focus();
+      }, 100);
+    }
+    window.showCellRefModal = showCellRefModal;
+
+    function closeCellRefModal() {
+      document.getElementById('cell-ref-modal').classList.remove('show');
+    }
+    window.closeCellRefModal = closeCellRefModal;
+
+    function renderCellRefPickerGrid() {
+      const container = document.getElementById('cell-ref-grid-container');
+      if (!container) return;
+
+      const liveTables = getEditorLiveTables();
+      const select = document.getElementById('cell-ref-table-select');
+      const tableIdx = select ? parseInt(select.value, 10) || 0 : 0;
+      const searchInput = document.getElementById('cell-ref-search');
+      const query = (searchInput ? searchInput.value : '').trim().toLowerCase();
+
+      container.innerHTML = '';
+
+      const table = liveTables[tableIdx] || liveTables[0];
+      if (!table) {
+        container.innerHTML = '<p style="color:#64748b;text-align:center;padding:20px;">No tables found</p>';
+        return;
+      }
+
+      const grid = document.createElement('div');
+      grid.style.display = 'grid';
+      grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(130px, 1fr))';
+      grid.style.gap = '8px';
+
+      let matchCount = 0;
+
+      for (let r = 0; r < table.rows.length; r++) {
+        const cells = table.rows[r].cells;
+        for (let c = 0; c < cells.length; c++) {
+          const cell = cells[c];
+          const coord = getCellCoordString(c, r);
+          const cellText = cleanFormulaText(cell.innerText || cell.textContent || '');
+          const formulaVal = cell.getAttribute('data-formula-val');
+          const displayVal = (formulaVal != null && formulaVal !== '') ? formulaVal : cellText;
+
+          let header = '';
+          if (r > 0 && table.rows[0].cells[c]) {
+            header = cleanFormulaText(table.rows[0].cells[c].innerText || '');
+          }
+
+          if (query) {
+            const mCoord = coord.toLowerCase().includes(query) || ('\$' + coord).toLowerCase().includes(query);
+            const mVal = displayVal.toLowerCase().includes(query);
+            const mHead = header.toLowerCase().includes(query);
+            if (!mCoord && !mVal && !mHead) continue;
+          }
+
+          matchCount++;
+          const card = document.createElement('div');
+          card.style.background = '#ffffff';
+          card.style.border = '1px solid #cbd5e1';
+          card.style.borderRadius = '6px';
+          card.style.padding = '6px 8px';
+          card.style.cursor = 'pointer';
+          card.style.display = 'flex';
+          card.style.flexDirection = 'column';
+          card.style.gap = '3px';
+          card.style.transition = 'all 0.15s ease';
+          card.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
+
+          card.onmouseenter = function() {
+            card.style.borderColor = '#3b82f6';
+            card.style.background = '#eff6ff';
+          };
+          card.onmouseleave = function() {
+            card.style.borderColor = '#cbd5e1';
+            card.style.background = '#ffffff';
+          };
+          card.onclick = (function(coordVal, textVal, tIdxVal) {
+            return function() {
+              insertCellReference(coordVal, textVal, tIdxVal);
+            };
+          })(coord, displayVal, tableIdx);
+
+          const topRow = document.createElement('div');
+          topRow.style.display = 'flex';
+          topRow.style.alignItems = 'center';
+          topRow.style.justifyContent = 'space-between';
+
+          const badge = document.createElement('span');
+          badge.style.fontWeight = 'bold';
+          badge.style.fontFamily = 'monospace';
+          badge.style.fontSize = '11px';
+          badge.style.background = '#dcfce7';
+          badge.style.color = '#15803d';
+          badge.style.padding = '1px 5px';
+          badge.style.borderRadius = '3px';
+          badge.textContent = coord;
+
+          const headSpan = document.createElement('span');
+          headSpan.style.fontSize = '10px';
+          headSpan.style.color = '#94a3b8';
+          headSpan.style.overflow = 'hidden';
+          headSpan.style.textOverflow = 'ellipsis';
+          headSpan.style.whiteSpace = 'nowrap';
+          headSpan.style.maxWidth = '65px';
+          headSpan.textContent = header ? ('• ' + header) : '';
+
+          topRow.appendChild(badge);
+          topRow.appendChild(headSpan);
+
+          const valDiv = document.createElement('div');
+          valDiv.style.fontSize = '12px';
+          valDiv.style.fontWeight = '600';
+          valDiv.style.color = '#1e293b';
+          valDiv.style.overflow = 'hidden';
+          valDiv.style.textOverflow = 'ellipsis';
+          valDiv.style.whiteSpace = 'nowrap';
+          valDiv.title = displayVal || '(empty)';
+          valDiv.textContent = displayVal || '(empty)';
+
+          card.appendChild(topRow);
+          card.appendChild(valDiv);
+          grid.appendChild(card);
+        }
+      }
+
+      if (matchCount === 0) {
+        container.innerHTML = '<p style="color:#64748b;text-align:center;padding:24px;">No cells match "' + query + '"</p>';
+      } else {
+        container.appendChild(grid);
+      }
+    }
+    window.renderCellRefPickerGrid = renderCellRefPickerGrid;
+
+    function insertCellReference(coord, val, tableIdx) {
+      if (tableIdx === undefined || tableIdx === null) tableIdx = 0;
+      closeCellRefModal();
+      coord = (coord || 'A1').toUpperCase();
+      const token = '\$' + (tableIdx > 0 ? ('T' + (tableIdx + 1) + ':' + coord) : coord);
+      const displayText = val || token;
+
+      if (editorInstance) {
+        try {
+          editorInstance.model.change(writer => {
+            const sel = editorInstance.model.document.selection;
+            const refData = {
+              coord: coord,
+              tableIdx: tableIdx
+            };
+            const textNode = writer.createText(displayText, {
+              tableCellRef: refData
+            });
+            editorInstance.model.insertContent(textNode, sel);
+            editorInstance.model.insertContent(writer.createText(' '), sel);
+          });
+          setTimeout(updateTableCellReferencesDOM, 20);
+          showToastMsg('✓ Inserted live reference to ' + coord + ' ("' + displayText + '")');
+        } catch (e) {
+          console.warn('insertCellReference model error:', e);
+        }
+      } else if (isFallback) {
+        const fc = document.getElementById('fallback-content');
+        if (fc) {
+          const pill = '<span class="mention table-cell-ref" data-mention="' + token + '" data-cell-coord="' + coord + '" data-table-idx="' + tableIdx + '" title="Table cell ' + coord + ': &quot;' + displayText + '&quot; (Live Link)">' + displayText + '</span>&nbsp;';
+          document.execCommand('insertHTML', false, pill);
+          showToastMsg('✓ Inserted live reference to ' + coord + ' ("' + displayText + '")');
+        }
+      }
+    }
+    window.insertCellReference = insertCellReference;
 
     /* ====== TABLE COLOR & STYLING LOGIC ====== */
     let lastActiveTableCell = null;
@@ -4293,182 +8448,171 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       });
     }
 
-    function applyPresetBg(bg, text) {
-      applyTableFormatting(bg, text, null);
+    /* Each control changes only its own property: background, border or text color */
+    function applyPresetBg(bg) {
+      applyTableFormatting({ bg: bg });
     }
 
     function applyCustomBg(bg) {
-      applyTableFormatting(bg, null, null);
+      applyTableFormatting({ bg: bg });
     }
 
     function clearTableBg() {
-      applyTableFormatting('', '#1e293b', null);
+      applyTableFormatting({ bg: '' });
     }
 
     function applyBorderColor(borderColor) {
-      applyTableFormatting(null, null, borderColor);
+      applyTableFormatting({ border: borderColor });
     }
 
     function applyTextColor(txtColor) {
-      applyTableFormatting(null, txtColor, null);
+      applyTableFormatting({ text: txtColor });
     }
 
-    function applyTableFormatting(bgColor, txtColor, borderColor) {
+    /* Model table cells the color target should affect, resolved from the editor selection */
+    function getTargetModelTableCells(editor) {
+      const tableUtils = editor.plugins.get('TableUtils');
+      const selection = editor.model.document.selection;
+      let selectedCells = tableUtils.getSelectionAffectedTableCells(selection);
+      if (selectedCells.length === 0) {
+        /* Selection left the table (e.g. focus moved to the modal) - fall back to the last clicked cell */
+        const domCell = getActiveTableCell();
+        if (domCell) {
+          try {
+            const viewCell = editor.editing.view.domConverter.mapDomToView(domCell);
+            const modelCell = viewCell ? editor.editing.mapper.toModelElement(viewCell) : null;
+            if (modelCell && modelCell.is('element', 'tableCell')) selectedCells = [modelCell];
+          } catch (e) {}
+        }
+      }
+      if (selectedCells.length === 0) return [];
+
+      const anchor = selectedCells[0];
+      const table = anchor.findAncestor('table');
+      if (!table) return [];
+      if (currentTableTarget === 'cell') return selectedCells;
+
+      const anchorLoc = tableUtils.getCellLocation(anchor);
+      const headingRows = table.getAttribute('headingRows') || 1;
+      const result = [];
+      for (const row of table.getChildren()) {
+        if (!row.is('element', 'tableRow')) continue;
+        for (const cell of row.getChildren()) {
+          if (!cell.is('element', 'tableCell')) continue;
+          const loc = tableUtils.getCellLocation(cell);
+          const rowSpan = parseInt(cell.getAttribute('rowspan') || 1, 10);
+          const colSpan = parseInt(cell.getAttribute('colspan') || 1, 10);
+          const coversRow = anchorLoc.row >= loc.row && anchorLoc.row < loc.row + rowSpan;
+          const coversCol = anchorLoc.column >= loc.column && anchorLoc.column < loc.column + colSpan;
+          if ((currentTableTarget === 'row' && coversRow) ||
+              (currentTableTarget === 'col' && coversCol) ||
+              (currentTableTarget === 'header' && loc.row < headingRows) ||
+              currentTableTarget === 'table' || currentTableTarget === 'zebra') {
+            result.push({ cell: cell, row: loc.row });
+          }
+        }
+      }
+      return result.map(r => (currentTableTarget === 'zebra' ? r : r.cell));
+    }
+
+    function zebraBg(bgColor, rowIdx) {
+      if (bgColor === undefined) return undefined;
+      return rowIdx % 2 === 0 ? (bgColor || '#f8fafc') : '#ffffff';
+    }
+
+    function applyTableFormatting(opts) {
+      const bgColor = opts.bg;
+      const borderColor = opts.border;
+      const txtColor = opts.text;
+
+      if (editorInstance && editorInstance.model) {
+        const editor = editorInstance;
+        let targets = [];
+        try { targets = getTargetModelTableCells(editor); } catch (e) { console.warn('Table target error:', e); }
+        if (targets.length === 0) {
+          showToastMsg('⚠️ Click inside a table cell first!');
+          return;
+        }
+        const schema = editor.model.schema;
+        const setTextAttr = (writer, cell, key, value) => {
+          const ranges = schema.getValidRanges([writer.createRangeIn(cell)], key);
+          for (const range of ranges) {
+            if (value === '' || value === null) writer.removeAttribute(key, range);
+            else writer.setAttribute(key, value, range);
+          }
+        };
+        const styleCell = (writer, cell, bg) => {
+          if (bg !== undefined) {
+            if (bg === '') writer.removeAttribute('tableCellBackgroundColor', cell);
+            else writer.setAttribute('tableCellBackgroundColor', bg, cell);
+          }
+          if (borderColor !== undefined) {
+            if (borderColor === '') {
+              writer.removeAttribute('tableCellBorderColor', cell);
+            } else {
+              writer.setAttribute('tableCellBorderColor', borderColor, cell);
+              /* A color alone is invisible without a border style/width */
+              if (!cell.getAttribute('tableCellBorderStyle')) writer.setAttribute('tableCellBorderStyle', 'solid', cell);
+              if (!cell.getAttribute('tableCellBorderWidth')) writer.setAttribute('tableCellBorderWidth', '1px', cell);
+            }
+          }
+          if (txtColor !== undefined) setTextAttr(writer, cell, 'fontColor', txtColor);
+          if (currentTableTarget === 'header') setTextAttr(writer, cell, 'bold', true);
+        };
+        try {
+          editor.model.change(writer => {
+            if (currentTableTarget === 'zebra') {
+              /* Background stripes alternate rows; border/text pickers apply to every row */
+              targets.forEach(t => styleCell(writer, t.cell, zebraBg(bgColor, t.row)));
+            } else {
+              targets.forEach(cell => styleCell(writer, cell, bgColor));
+            }
+          });
+        } catch (e) {
+          console.warn('Model table formatting error:', e);
+          showToastMsg('⚠️ Could not apply table formatting');
+          return;
+        }
+        showToastMsg('🎨 Table formatting updated!');
+        return;
+      }
+
+      /* Fallback editor (plain contenteditable): style the DOM directly */
       const cell = getActiveTableCell();
-      if (!cell) {
+      if (!cell || !cell.closest('table')) {
         showToastMsg('⚠️ Click inside a table cell first!');
         return;
       }
       const table = cell.closest('table');
-      if (!table) return;
-
-      const liveTables = getEditorLiveTables();
-      const tableIdx = Math.max(0, liveTables.indexOf(table));
-      const colIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
       const row = cell.closest('tr');
-      const rowIdx = row ? row.rowIndex : 0;
-
-      // 1. Direct DOM style application for instant visual feedback
-      const applyToDomCell = (c) => {
+      const colIdx = cell.cellIndex !== undefined ? cell.cellIndex : 0;
+      const applyToDomCell = (c, bg) => {
         if (!c) return;
-        if (bgColor !== null && bgColor !== undefined) c.style.backgroundColor = bgColor;
-        if (txtColor !== null && txtColor !== undefined) c.style.color = txtColor;
-        if (borderColor !== null && borderColor !== undefined) {
+        if (bg !== undefined) c.style.backgroundColor = bg;
+        if (txtColor !== undefined) c.style.color = txtColor;
+        if (borderColor !== undefined) {
           c.style.borderColor = borderColor;
-          c.style.borderWidth = '1px';
-          c.style.borderStyle = 'solid';
+          if (borderColor) {
+            c.style.borderWidth = c.style.borderWidth || '1px';
+            c.style.borderStyle = c.style.borderStyle || 'solid';
+          }
         }
+        if (currentTableTarget === 'header') c.style.fontWeight = '700';
       };
-
-      if (currentTableTarget === 'cell') {
-        applyToDomCell(cell);
-      } else if (currentTableTarget === 'col') {
-        for (let i = 0; i < table.rows.length; i++) {
-          const r = table.rows[i];
-          if (r.cells && r.cells[colIdx]) applyToDomCell(r.cells[colIdx]);
-        }
-      } else if (currentTableTarget === 'row') {
-        if (row && row.cells) {
-          for (let j = 0; j < row.cells.length; j++) applyToDomCell(row.cells[j]);
-        }
-      } else if (currentTableTarget === 'table') {
-        for (let i = 0; i < table.rows.length; i++) {
-          const r = table.rows[i];
-          for (let j = 0; j < r.cells.length; j++) applyToDomCell(r.cells[j]);
-        }
-      } else if (currentTableTarget === 'header') {
-        if (table.rows.length > 0) {
-          const r = table.rows[0];
-          for (let j = 0; j < r.cells.length; j++) {
-            const c = r.cells[j];
-            applyToDomCell(c);
-            c.style.fontWeight = '700';
-          }
-        }
-      } else if (currentTableTarget === 'zebra') {
-        const color1 = bgColor || '#f8fafc';
-        const color2 = '#ffffff';
-        for (let i = 0; i < table.rows.length; i++) {
-          const bg = (i % 2 === 0) ? color1 : color2;
-          const r = table.rows[i];
-          for (let j = 0; j < r.cells.length; j++) {
-            r.cells[j].style.backgroundColor = bg;
-            if (txtColor) r.cells[j].style.color = txtColor;
-            if (borderColor) r.cells[j].style.borderColor = borderColor;
-          }
+      for (let i = 0; i < table.rows.length; i++) {
+        const r = table.rows[i];
+        for (let j = 0; j < r.cells.length; j++) {
+          const c = r.cells[j];
+          const hit = currentTableTarget === 'table' || currentTableTarget === 'zebra' ||
+            (currentTableTarget === 'cell' && c === cell) ||
+            (currentTableTarget === 'row' && r === row) ||
+            (currentTableTarget === 'col' && j === colIdx) ||
+            (currentTableTarget === 'header' && i === 0);
+          if (!hit) continue;
+          applyToDomCell(c, currentTableTarget === 'zebra' ? zebraBg(bgColor, i) : bgColor);
         }
       }
-
-      // 2. Persist in CKEditor 5 model
-      if (editorInstance && editorInstance.model) {
-        try {
-          editorInstance.model.change(writer => {
-            const root = editorInstance.model.document.getRoot();
-            let curT = 0;
-            for (const child of root.getChildren()) {
-              if (child.name === 'table') {
-                if (curT === tableIdx) {
-                  const modelRows = Array.from(child.getChildren()).filter(n => n.name === 'tableRow');
-                  const applyToModelCell = (mCell) => {
-                    if (!mCell) return;
-                    if (bgColor !== null && bgColor !== undefined) {
-                      if (bgColor === '') writer.removeAttribute('backgroundColor', mCell);
-                      else writer.setAttribute('backgroundColor', bgColor, mCell);
-                    }
-                    if (borderColor !== null && borderColor !== undefined) {
-                      if (borderColor === '') {
-                        writer.removeAttribute('borderColor', mCell);
-                        writer.removeAttribute('borderStyle', mCell);
-                        writer.removeAttribute('borderWidth', mCell);
-                      } else {
-                        writer.setAttribute('borderColor', borderColor, mCell);
-                        writer.setAttribute('borderStyle', 'solid', mCell);
-                        writer.setAttribute('borderWidth', '1px', mCell);
-                      }
-                    }
-                    if (txtColor !== null && txtColor !== undefined) {
-                      for (const p of mCell.getChildren()) {
-                        const range = writer.createRangeIn(p);
-                        if (txtColor === '') writer.removeAttribute('fontColor', range);
-                        else writer.setAttribute('fontColor', txtColor, range);
-                      }
-                    }
-                  };
-
-                  if (currentTableTarget === 'cell') {
-                    if (modelRows[rowIdx]) {
-                      const mCells = Array.from(modelRows[rowIdx].getChildren()).filter(n => n.name === 'tableCell');
-                      if (mCells[colIdx]) applyToModelCell(mCells[colIdx]);
-                    }
-                  } else if (currentTableTarget === 'col') {
-                    for (let r = 0; r < modelRows.length; r++) {
-                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
-                      if (mCells[colIdx]) applyToModelCell(mCells[colIdx]);
-                    }
-                  } else if (currentTableTarget === 'row') {
-                    if (modelRows[rowIdx]) {
-                      const mCells = Array.from(modelRows[rowIdx].getChildren()).filter(n => n.name === 'tableCell');
-                      mCells.forEach(applyToModelCell);
-                    }
-                  } else if (currentTableTarget === 'table') {
-                    for (let r = 0; r < modelRows.length; r++) {
-                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
-                      mCells.forEach(applyToModelCell);
-                    }
-                  } else if (currentTableTarget === 'header') {
-                    if (modelRows[0]) {
-                      const mCells = Array.from(modelRows[0].getChildren()).filter(n => n.name === 'tableCell');
-                      mCells.forEach(applyToModelCell);
-                    }
-                  } else if (currentTableTarget === 'zebra') {
-                    const color1 = bgColor || '#f8fafc';
-                    const color2 = '#ffffff';
-                    for (let r = 0; r < modelRows.length; r++) {
-                      const bg = (r % 2 === 0) ? color1 : color2;
-                      const mCells = Array.from(modelRows[r].getChildren()).filter(n => n.name === 'tableCell');
-                      mCells.forEach(mc => {
-                        writer.setAttribute('backgroundColor', bg, mc);
-                        if (borderColor) writer.setAttribute('borderColor', borderColor, mc);
-                        if (txtColor) {
-                          for (const p of mc.getChildren()) {
-                            writer.setAttribute('fontColor', txtColor, writer.createRangeIn(p));
-                          }
-                        }
-                      });
-                    }
-                  }
-                  break;
-                }
-                curT++;
-              }
-            }
-          });
-        } catch(e) {
-          console.warn('Model table formatting error:', e);
-        }
-      }
-
-      // 3. Post to Flutter
+      if (typeof updateFallbackStats === 'function') updateFallbackStats();
       postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       showToastMsg('🎨 Table formatting updated!');
     }
@@ -4751,6 +8895,9 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               return p.split('?')[0].split('&')[0];
             }
             if (u.hostname.indexOf('youtube.com') !== -1) {
+              if (u.pathname.indexOf('/shorts/') !== -1) {
+                return u.pathname.split('/shorts/')[1].split('/')[0];
+              }
               if (u.pathname.indexOf('/embed/') !== -1) {
                 return u.pathname.split('/embed/')[1].split('?')[0];
               }
@@ -4764,6 +8911,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         }
 
         const ytId = extractYouTubeId(url);
+        let vimeoId = '';
+        if (!ytId && url.indexOf('vimeo.com/') !== -1) {
+          vimeoId = url.split('vimeo.com/')[1].split('?')[0].split('#')[0].split('/').filter(Boolean).pop() || '';
+        }
+        /* YouTube/Vimeo go through CKEditor Media Embed (same as its toolbar button) so the player
+           stays a real media widget: playable in Preview, resizable, and kept in the saved HTML */
+        const embedUrl = ytId ? 'https://www.youtube.com/watch?v=' + ytId : (vimeoId ? 'https://vimeo.com/' + vimeoId : '');
+        if (embedUrl && editorInstance && editorInstance.commands.get('mediaEmbed')) {
+          closeVideoModal();
+          insertVideoViaMediaEmbed(embedUrl, size, align);
+          return;
+        }
         if (ytId) {
           const videoSrc = 'https://www.youtube.com/embed/' + ytId;
           embedHtml = '<figure class="media ' + alignClass + '" style="' + styleAttr + '"><iframe src="' + videoSrc + '" style="width:100%;aspect-ratio:16/9;border:none;border-radius:8px;" allowfullscreen></iframe></figure><p>&nbsp;</p>';
@@ -4790,6 +8949,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (editorInstance) {
         const viewFragment = editorInstance.data.processor.toView(embedHtml);
         const modelFragment = editorInstance.data.toModel(viewFragment);
+        moveSelectionAfterSelectedWidget(editorInstance);
         editorInstance.model.insertContent(modelFragment);
         setTimeout(() => {
           attachMediaListeners();
@@ -4803,6 +8963,40 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           }
         }, 120);
       }
+      showToastMsg('🎬 Video attached (' + size + ' width)');
+    }
+
+    /* With a widget (e.g. another video) selected, inserting would replace it - insert after it instead */
+    function moveSelectionAfterSelectedWidget(editor) {
+      const selected = editor.model.document.selection.getSelectedElement();
+      if (!selected || !editor.model.schema.isObject(selected)) return;
+      editor.model.change(writer => {
+        const paragraph = writer.createElement('paragraph');
+        writer.insert(paragraph, selected, 'after');
+        writer.setSelection(paragraph, 0);
+      });
+    }
+
+    function insertVideoViaMediaEmbed(url, size, align) {
+      const editor = editorInstance;
+      const margin = align === 'left' ? '16px auto 16px 0' : (align === 'right' ? '16px 0 16px auto' : '16px auto');
+      /* Size/alignment live in the media style registry, keyed by the figure's data-oembed-url */
+      window._mediaStyleRegistry = window._mediaStyleRegistry || {};
+      window._mediaStyleRegistry[url] = {
+        width: size,
+        maxWidth: size,
+        margin: margin,
+        style: 'width:' + size + ';max-width:' + size + ';margin:' + margin + ';'
+      };
+      moveSelectionAfterSelectedWidget(editor);
+      editor.execute('mediaEmbed', url);
+      editor.editing.view.focus();
+      setTimeout(() => {
+        reapplyAllMediaStyles();
+        attachMediaListeners();
+        attachMediaDragHandles();
+        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+      }, 120);
       showToastMsg('🎬 Video attached (' + size + ' width)');
     }
 
@@ -5081,7 +9275,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       { id: 'math', name: 'Math Equation', desc: 'LaTeX mathematical formula', icon: '∑', fn: () => { closeSlashModal(); showMathModal(); } },
       { id: 'template', name: 'Document Template', desc: 'Insert pre-made structured layout', icon: '📋', fn: () => { closeSlashModal(); showTemplateModal(); } },
       { id: 'user_alex', name: 'Mention @Alex', desc: 'Insert team mention @alex', icon: '@', fn: () => insertSlashHtml('<span class="mention" data-mention="@alex">@alex</span>&nbsp;') },
-      { id: 'tag_lims', name: 'Tag #LIMS', desc: 'Insert category tag #lims', icon: '#', fn: () => insertSlashHtml('<span class="mention" data-mention="#lims">#lims</span>&nbsp;') }
+      { id: 'tag_lims', name: 'Tag #LIMS', desc: 'Insert category tag #lims', icon: '#', fn: () => insertSlashHtml('<span class="mention" data-mention="#lims">#lims</span>&nbsp;') },
+      { id: 'ref_cell', name: 'Reference Table Cell (\$)', desc: 'Link live cell value in text (e.g. \$A1)', icon: '\$', fn: () => { closeSlashModal(); showCellRefModal(); } },
+      { id: 'formula', name: 'Table Formula (=)', desc: 'Insert live calculated formula (e.g. =SUM(A1+A2))', icon: '🧮', fn: () => { closeSlashModal(); showFormulaHelpModal(); } },
+      { id: 'voice_to_text', name: 'Voice to Text (Dictation)', desc: 'Speak to type directly into document', icon: '🎙️', fn: () => { closeSlashModal(); toggleDirectVoiceInput(); } }
     ];
 
     function showSlashModal() {
@@ -5122,6 +9319,14 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       closeSlashModal();
       if (editorInstance) {
         try { editorInstance.execute(command, params); } catch(e) { console.warn(e); }
+      } else if (isFallback) {
+        if (command === 'bulletedList') formatDoc('insertUnorderedList');
+        else if (command === 'numberedList') formatDoc('insertOrderedList');
+        else if (command === 'insertTable') insertFallbackTable();
+        else if (command === 'horizontalLine') insertFallbackHorizontalRule();
+        else if (command === 'heading') formatDoc('formatBlock', (params && params.value === 'heading1') ? 'h1' : (params && params.value === 'heading2') ? 'h2' : 'h3');
+        else if (command === 'blockQuote') formatDoc('formatBlock', 'blockquote');
+        else if (command === 'codeBlock') formatDoc('formatBlock', 'pre');
       }
     }
 
@@ -5131,6 +9336,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         const viewFragment = editorInstance.data.processor.toView(html);
         const modelFragment = editorInstance.data.toModel(viewFragment);
         editorInstance.model.insertContent(modelFragment);
+      } else if (isFallback) {
+        document.execCommand('insertHTML', false, html);
+        updateFallbackStats();
+        postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
       }
     }
 
@@ -5164,18 +9373,31 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           const isFormPanel = panel.querySelector('.ck-form, .ck-table-properties-form, .ck-table-cell-properties-form');
           if (!isFormPanel) return;
 
-          const rect = panel.getBoundingClientRect();
+          let rect = panel.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) return;
 
-          // Adjust vertical position only if overflowing bottom so Save/Cancel buttons are visible
-          if (rect.bottom > maxBottom) {
-            const overflowY = rect.bottom - maxBottom;
-            const currentTop = parseFloat(panel.style.top) || rect.top;
-            const newTop = Math.max(minTop, currentTop - overflowY);
-            if (Math.abs(currentTop - newTop) > 1) {
-              panel.style.top = newTop + 'px';
-            }
+          /* Never taller than the visible area: the form content scrolls instead */
+          const available = Math.max(160, maxBottom - minTop);
+          const maxH = available + 'px';
+          if (panel.style.getPropertyValue('max-height') !== maxH) {
+            /* 'important' to beat the stylesheet's !important viewport-based max-height */
+            panel.style.setProperty('max-height', maxH, 'important');
+            const content = panel.querySelector('.ck-balloon-panel__content');
+            if (content) content.style.setProperty('max-height', maxH, 'important');
+            rect = panel.getBoundingClientRect();
           }
+
+          /* Keep the whole form on screen: push down if the top is cut off, up if the bottom is */
+          let shiftY = 0;
+          if (rect.top < minTop) shiftY = minTop - rect.top;
+          else if (rect.bottom > maxBottom) shiftY = Math.max(minTop - rect.top, maxBottom - rect.bottom);
+          if (Math.abs(shiftY) > 1) {
+            const currentTop = parseFloat(panel.style.top);
+            panel.style.top = (isNaN(currentTop) ? rect.top : currentTop) + shiftY + 'px';
+            panel.dataset.clampedTop = panel.style.top;
+          }
+          /* Still where we moved it (CKEditor has not re-placed it): the arrow would point at the wrong spot */
+          panel.classList.toggle('balloon-clamped', !!panel.dataset.clampedTop && panel.dataset.clampedTop === panel.style.top);
 
           // Adjust horizontal position if overflowing right or left
           if (rect.right > maxRight) {
@@ -5192,16 +9414,18 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     }
 
     // Observe when balloon panels are added or opened (do NOT observe 'style' to avoid loops)
-    const balloonObserver = new MutationObserver(() => {
-      if (!_isClamping) {
-        requestAnimationFrame(clampAllBalloons);
-      }
+    const balloonObserver = new MutationObserver((mutations) => {
+      if (_isClamping) return;
+      /* CKEditor re-places balloons by rewriting their style; other style changes are irrelevant here */
+      const relevant = mutations.some(m => m.type !== 'attributes' || m.attributeName !== 'style' ||
+        (m.target.classList && m.target.classList.contains('ck-balloon-panel')));
+      if (relevant) requestAnimationFrame(clampAllBalloons);
     });
     balloonObserver.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['class']
+      attributeFilter: ['class', 'style']
     });
 
     window.addEventListener('resize', () => { requestAnimationFrame(clampAllBalloons); });
@@ -5234,10 +9458,38 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
           const viewFragment = editorInstance.data.processor.toView(msg.html);
           const modelFragment = editorInstance.data.toModel(viewFragment);
           editorInstance.model.insertContent(modelFragment);
+        } else if (isFallback) {
+          document.execCommand('insertHTML', false, msg.html);
+          updateFallbackStats();
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
         }
+      } else if (msg.type === 'insertVoiceHtml') {
+        // Insert HTML returned by the Flutter/API voice/AI pipeline
+        const html = msg.html || '';
+        if (html && editorInstance) {
+          const viewFragment = editorInstance.data.processor.toView(html);
+          const modelFragment = editorInstance.data.toModel(viewFragment);
+          editorInstance.model.insertContent(modelFragment);
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        } else if (html && isFallback) {
+          document.execCommand('insertHTML', false, html);
+          updateFallbackStats();
+          postToFlutter({ type: 'ckeditor_change', html: getEditorData() });
+        }
+        closeAiPromptModal();
+        resetAiApiButton();
+      } else if (msg.type === 'ai_generate_error') {
+        const banner = document.getElementById('ai-error-banner');
+        if (banner) {
+          banner.textContent = msg.error || 'Failed to generate HTML content.';
+          banner.style.display = 'block';
+        }
+        resetAiApiButton();
       } else if (msg.type === 'executeCommand') {
         if (editorInstance) {
           try { editorInstance.execute(msg.command, msg.params); } catch(e) {}
+        } else if (isFallback) {
+          try { formatDoc(msg.command, msg.params); } catch(e) {}
         }
       }
     });

@@ -26,16 +26,20 @@ class HtmlDocumentCodec {
         final int level = (node.metadata['level'] as num?)?.toInt() ?? 1;
         final String content = _encodeInline(node);
         final String align = node.attributes['align'] as String? ?? '';
+        final String dir = node.attributes['dir'] as String? ?? '';
         final String styleAttr = align.isNotEmpty ? ' style="text-align: $align;"' : '';
-        return '<h$level$styleAttr>$content</h$level>\n';
+        final String dirAttr = dir.isNotEmpty ? ' dir="$dir"' : '';
+        return '<h$level$dirAttr$styleAttr>$content</h$level>\n';
       case 'blockquote':
         final String content = _encodeInline(node);
         final String align = node.attributes['align'] as String? ?? '';
+        final String dir = node.attributes['dir'] as String? ?? '';
         final String styleAttr = align.isNotEmpty ? ' style="text-align: $align;"' : '';
+        final String dirAttr = dir.isNotEmpty ? ' dir="$dir"' : '';
         if (content.startsWith('<p>') && content.endsWith('</p>')) {
-          return '<blockquote$styleAttr>$content</blockquote>\n';
+          return '<blockquote$dirAttr$styleAttr>$content</blockquote>\n';
         }
-        return '<blockquote$styleAttr><p>$content</p></blockquote>\n';
+        return '<blockquote$dirAttr$styleAttr><p>$content</p></blockquote>\n';
       case 'hr':
         return '<hr>\n';
       case 'code_block':
@@ -74,8 +78,10 @@ class HtmlDocumentCodec {
       default:
         final String content = _encodeInline(node);
         final String align = node.attributes['align'] as String? ?? '';
+        final String dir = node.attributes['dir'] as String? ?? '';
         final String styleAttr = align.isNotEmpty ? ' style="text-align: $align;"' : '';
-        return '<p$styleAttr>$content</p>\n';
+        final String dirAttr = dir.isNotEmpty ? ' dir="$dir"' : '';
+        return '<p$dirAttr$styleAttr>$content</p>\n';
     }
   }
 
@@ -92,13 +98,20 @@ class HtmlDocumentCodec {
 
     final String tableClass = tableNode.metadata['class'] as String? ?? '';
     final String tableStyle = tableNode.metadata['style'] as String? ?? '';
+    final String tableDir = tableNode.metadata['dir'] as String? ?? tableNode.attributes['dir'] as String? ?? '';
     final String classAttr = tableClass.isNotEmpty ? ' class="$tableClass"' : '';
     final String styleAttr = tableStyle.isNotEmpty ? ' style="$tableStyle"' : '';
+    final String dirAttr = tableDir.isNotEmpty ? ' dir="$tableDir"' : '';
 
-    buffer.write('  <table$classAttr$styleAttr>\n');
+    buffer.write('  <table$dirAttr$classAttr$styleAttr>\n');
     final String caption = tableNode.metadata['caption'] as String? ?? '';
     if (caption.isNotEmpty) {
       buffer.write('    <caption>$caption</caption>\n');
+    }
+    // Column widths set by dragging in CKEditor live in <colgroup>; keep them so columns don't reset
+    final String colgroup = tableNode.metadata['colgroup'] as String? ?? '';
+    if (colgroup.isNotEmpty) {
+      buffer.write('    $colgroup\n');
     }
     buffer.write('    <tbody>\n');
     for (final EditorNode row in tableNode.children) {
@@ -117,10 +130,12 @@ class HtmlDocumentCodec {
         final String cellStyle = cell.metadata['style'] as String? ?? '';
         final String cellClass = cell.metadata['class'] as String? ?? '';
         final String? formula = cell.metadata['data-formula'] as String?;
+        final String? formulaVal = cell.metadata['data-formula-val'] as String?;
         final String? title = cell.metadata['title'] as String?;
         final String cStyleAttr = cellStyle.isNotEmpty ? ' style="$cellStyle"' : '';
         final String cClassAttr = cellClass.isNotEmpty ? ' class="$cellClass"' : '';
         final String formulaAttr = (formula != null && formula.isNotEmpty) ? ' data-formula="$formula"' : '';
+        final String formulaValAttr = (formulaVal != null && formulaVal.isNotEmpty) ? ' data-formula-val="$formulaVal"' : '';
         final String titleAttr = (title != null && title.isNotEmpty) ? ' title="$title"' : '';
 
         String cellHtml = cell.metadata['html'] as String? ?? '';
@@ -133,7 +148,7 @@ class HtmlDocumentCodec {
             ? cellHtml
             : (rawText.isNotEmpty ? _escapeHtml(rawText) : '&nbsp;');
 
-        buffer.write('        <$tag$colspanAttr$rowspanAttr$formulaAttr$titleAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
+        buffer.write('        <$tag$colspanAttr$rowspanAttr$formulaAttr$formulaValAttr$titleAttr$cClassAttr$cStyleAttr>$cellContent</$tag>\n');
       }
       buffer.write('      </tr>\n');
     }
@@ -148,9 +163,19 @@ class HtmlDocumentCodec {
   String _encodeList(EditorNode listNode) {
     final String listType = listNode.metadata['listType'] as String? ?? 'bullet';
     final String tag = listType == 'numbered' ? 'ol' : 'ul';
+    final String dir = listNode.attributes['dir'] as String? ?? '';
+    final String dirAttr = dir.isNotEmpty ? ' dir="$dir"' : '';
     final StringBuffer buffer = StringBuffer();
-    buffer.write('<$tag>\n');
-    buffer.write('  <li>${_encodeInline(listNode)}');
+    if (listType == 'todo') {
+      // CKEditor's to-do markup; this "with description" form is the one it reads the checked state back from
+      final String checkedAttr = listNode.metadata['checked'] == true ? ' checked="checked"' : '';
+      buffer.write('<ul class="todo-list"$dirAttr>\n');
+      buffer.write('  <li><label class="todo-list__label"><input type="checkbox" disabled="disabled"$checkedAttr>'
+          '<span class="todo-list__label__description">${_encodeInline(listNode)}</span></label>');
+    } else {
+      buffer.write('<$tag$dirAttr>\n');
+      buffer.write('  <li>${_encodeInline(listNode)}');
+    }
     if (listNode.children.isNotEmpty) {
       for (final EditorNode child in listNode.children) {
         buffer.write('\n    ${_encodeNode(child)}');
@@ -315,15 +340,22 @@ class HtmlDocumentCodec {
 
       case 'ul':
       case 'ol':
-        final String listType = tag == 'ol' ? 'numbered' : 'bullet';
+        final bool isTodo = element.classes.contains('todo-list');
+        final String listType = isTodo ? 'todo' : (tag == 'ol' ? 'numbered' : 'bullet');
+        final String? listDir = element.attributes['dir'];
         for (final dom.Element li in element.children.where((dom.Element c) => c.localName == 'li')) {
+          final Map<String, dynamic> attrs = _extractAttributes(li);
+          if (listDir != null && !attrs.containsKey('dir')) {
+            attrs['dir'] = listDir;
+          }
           nodes.add(EditorNode.listItem(
             id: 'li_${nextId()}',
             text: li.nodes.whereType<dom.Text>().map((dom.Text t) => t.text).join(' ').trim().isNotEmpty
                 ? li.nodes.whereType<dom.Text>().map((dom.Text t) => t.text).join(' ').trim()
                 : li.text.trim(),
             listType: listType,
-            attributes: _extractAttributes(li),
+            checked: isTodo && _isTodoItemChecked(li),
+            attributes: attrs,
           ));
         }
         break;
@@ -430,6 +462,26 @@ class HtmlDocumentCodec {
         ));
         break;
 
+      case 'div':
+        if (element.children.isNotEmpty) {
+          final String? divDir = element.attributes['dir'];
+          for (final dom.Element child in element.children) {
+            if (divDir != null && !child.attributes.containsKey('dir')) {
+              child.attributes['dir'] = divDir;
+            }
+            _parseElement(child, nodes, nextId);
+          }
+          break;
+        }
+        final String inner = element.innerHtml.trim();
+        final String text = inner.contains('<') ? inner : element.text.trim();
+        nodes.add(EditorNode.paragraph(
+          id: 'p_${nextId()}',
+          text: text,
+          attributes: _extractAttributes(element),
+        ));
+        break;
+
       case 'p':
       default:
         final String inner = element.innerHtml.trim();
@@ -468,13 +520,14 @@ class HtmlDocumentCodec {
         String innerHtml = cell.innerHtml.trim();
         innerHtml = innerHtml.replaceAll(RegExp(r'<span class="formula-badge"[^>]*>.*?</span>', caseSensitive: false), '').trim();
         innerHtml = innerHtml.replaceAllMapped(RegExp(r'(\d+)\s*fx\b', caseSensitive: false), (m) => m[1]!);
-        String cellText = cell.text.replaceAll(RegExp(r'\s*fx\b', caseSensitive: false), '').trim();
+        final String cellText = cell.text.replaceAll(RegExp(r'\s*fx\b', caseSensitive: false), '').trim();
         final String? colspan = cell.attributes['colspan'];
         final String? rowspan = cell.attributes['rowspan'];
         final String? cellStyle = cell.attributes['style'];
         final String? cellClass = cell.attributes['class'];
         String? cellFormula = cell.attributes['data-formula'] ?? cell.querySelector('[data-formula]')?.attributes['data-formula'];
         final String? cellTitle = cell.attributes['title'] ?? cell.querySelector('[title*="Formula:"]')?.attributes['title'];
+        final String? cellFormulaVal = cell.attributes['data-formula-val'] ?? cell.querySelector('[data-formula-val]')?.attributes['data-formula-val'];
         if ((cellFormula == null || cellFormula.isEmpty) && cellTitle != null && cellTitle.contains('Formula:')) {
           final int idx = cellTitle.indexOf('Formula:');
           String cand = cellTitle.substring(idx + 8).trim();
@@ -497,6 +550,7 @@ class HtmlDocumentCodec {
             if (cellStyle != null && cellStyle.isNotEmpty) 'style': cellStyle,
             if (cellClass != null && cellClass.isNotEmpty) 'class': cellClass,
             if (cellFormula != null && cellFormula.isNotEmpty) 'data-formula': cellFormula,
+            if (cellFormulaVal != null && cellFormulaVal.isNotEmpty) 'data-formula-val': cellFormulaVal,
             if (cellTitle != null && cellTitle.isNotEmpty) 'title': cellTitle,
           },
         ));
@@ -517,6 +571,8 @@ class HtmlDocumentCodec {
 
     final String? tableStyle = tableElement.attributes['style'];
     final String? tableClass = tableElement.attributes['class'];
+    final String? colgroup = tableElement.querySelector('colgroup')?.outerHtml;
+    final String? tableDir = tableElement.attributes['dir'] ?? figureElement?.attributes['dir'];
     final String? figStyle = figureElement?.attributes['style'];
     final String? figClass = figureElement?.attributes['class'];
 
@@ -528,13 +584,30 @@ class HtmlDocumentCodec {
         'columns': colCount,
         'caption': caption,
         'wrapInFigure': figureElement != null,
+        if (tableDir != null && tableDir.isNotEmpty) 'dir': tableDir,
         if (figStyle != null && figStyle.isNotEmpty) 'figureStyle': figStyle,
         if (figClass != null && figClass.isNotEmpty) 'figureClass': figClass,
         if (tableStyle != null && tableStyle.isNotEmpty) 'style': tableStyle,
         if (tableClass != null && tableClass.isNotEmpty) 'class': tableClass,
+        if (colgroup != null && colgroup.isNotEmpty) 'colgroup': colgroup,
+      },
+      attributes: <String, dynamic>{
+        if (tableDir != null && tableDir.isNotEmpty) 'dir': tableDir,
       },
       children: rowNodes,
     ));
+  }
+
+  /// Whether a to-do `<li>` has its own checkbox checked (ignoring checkboxes of nested lists).
+  bool _isTodoItemChecked(dom.Element li) {
+    for (final dom.Element box in li.querySelectorAll('input[type="checkbox"]')) {
+      dom.Element? owner = box.parent;
+      while (owner != null && owner.localName != 'li') {
+        owner = owner.parent;
+      }
+      if (owner == li) return box.attributes.containsKey('checked');
+    }
+    return false;
   }
 
   Map<String, dynamic> _extractAttributes(dom.Element element) {
@@ -567,6 +640,9 @@ class HtmlDocumentCodec {
     if (a != null && a.attributes.containsKey('href')) {
       attrs['link'] = a.attributes['href'];
     }
+    if (element.attributes.containsKey('dir')) {
+      attrs['dir'] = element.attributes['dir'];
+    }
     if (style.isNotEmpty) {
       if (style.contains('text-align:')) {
         final RegExp alignRegex = RegExp(r'text-align:\s*([a-zA-Z]+)');
@@ -576,7 +652,7 @@ class HtmlDocumentCodec {
         }
       }
       if (style.contains('color:')) {
-        final RegExp colorRegex = RegExp(r'(?<!background-)color:\s*([^;]+)');
+        final RegExp colorRegex = RegExp(r'(?<![\w-])color:\s*([^;]+)');
         final Match? match = colorRegex.firstMatch(style);
         if (match != null) {
           attrs['color'] = match.group(1)?.trim();

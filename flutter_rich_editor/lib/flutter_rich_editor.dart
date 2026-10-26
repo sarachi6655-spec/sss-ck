@@ -19,6 +19,7 @@ export 'src/widgets/widgets.dart';
 export 'src/serialization/serialization.dart';
 
 // Features
+export 'src/features/voice_input/voice_input.dart';
 export 'src/features/accessibility_ui/accessibility_plugin.dart';
 export 'src/features/code/code_block_plugin.dart';
 export 'src/features/code/mermaid_plugin.dart';

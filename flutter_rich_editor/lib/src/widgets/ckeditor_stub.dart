@@ -9,6 +9,7 @@ class CKEditorWebView extends StatelessWidget {
     required this.placeholder,
     required this.onContentChanged,
     this.onEditorReady,
+    this.onVoiceInput,
   });
 
   final String initialHtml;
@@ -16,6 +17,7 @@ class CKEditorWebView extends StatelessWidget {
   final String placeholder;
   final void Function(String html) onContentChanged;
   final void Function(void Function(String html) setHtml)? onEditorReady;
+  final Future<String?> Function(String text)? onVoiceInput;
 
   @override
   Widget build(BuildContext context) {

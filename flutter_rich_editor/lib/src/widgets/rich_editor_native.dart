@@ -182,8 +182,23 @@ class _RichEditorNativeState extends State<RichEditorNative> {
   void _updateNodeText(int index, String newText) {
     final List<EditorNode> nodes = List<EditorNode>.from(widget.controller.document.nodes);
     if (index >= 0 && index < nodes.length) {
-      nodes[index] = nodes[index].copyWith(text: newText);
-      final int offset = _nodeControllers[nodes[index].id]?.selection.baseOffset ?? newText.length;
+      String resolvedText = newText;
+      // Auto-resolve table cell references like $A1 when followed by space or punctuation
+      if (newText.contains(r'$') && (newText.endsWith(' ') || newText.endsWith('\n') || newText.endsWith('.') || newText.endsWith(','))) {
+        resolvedText = widget.controller.resolveCellReferences(newText);
+        if (resolvedText != newText) {
+          final RichTextEditingController? ctrl = _nodeControllers[nodes[index].id];
+          if (ctrl != null) {
+            final int diff = resolvedText.length - newText.length;
+            final TextSelection currentSel = ctrl.selection;
+            ctrl.text = resolvedText;
+            ctrl.selection = TextSelection.collapsed(offset: (currentSel.baseOffset + diff).clamp(0, resolvedText.length));
+          }
+        }
+      }
+
+      nodes[index] = nodes[index].copyWith(text: resolvedText);
+      final int offset = _nodeControllers[nodes[index].id]?.selection.baseOffset ?? resolvedText.length;
       widget.controller.updateDocumentDirect(
         widget.controller.document.copyWith(
           nodes: nodes,
@@ -211,6 +226,27 @@ class _RichEditorNativeState extends State<RichEditorNative> {
 
     final List<EditorNode> docNodes = List<EditorNode>.from(widget.controller.document.nodes);
     docNodes[tableIndex] = tableNode.copyWith(children: updatedRows);
+
+    final String cellCoord = RichEditorController.formatCellCoord(cellIdx, rowIdx);
+
+    // Sync any text nodes that reference this table cell via <span class="table-cell-ref" data-cell-coord="..."> or $Coord
+    for (int i = 0; i < docNodes.length; i++) {
+      if (i == tableIndex) continue;
+      final EditorNode n = docNodes[i];
+      if (n.text.contains(cellCoord)) {
+        final String updatedHtml = n.text.replaceAllMapped(
+          RegExp('<span[^>]*data-cell-coord="$cellCoord"[^>]*>.*?</span>', caseSensitive: false),
+          (Match m) => '<span class="mention table-cell-ref" data-mention="\$$cellCoord" data-cell-coord="$cellCoord" title="Table cell $cellCoord: $newText (Live Link)">$newText</span>',
+        );
+        if (updatedHtml != n.text) {
+          docNodes[i] = n.copyWith(text: updatedHtml);
+          final RichTextEditingController? c = _nodeControllers[n.id];
+          if (c != null && c.text != updatedHtml) {
+            c.text = updatedHtml;
+          }
+        }
+      }
+    }
 
     widget.controller.updateDocumentDirect(
       widget.controller.document.copyWith(nodes: docNodes),

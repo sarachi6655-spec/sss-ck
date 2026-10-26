@@ -7,6 +7,7 @@ import '../features/media/link_plugin.dart';
 import '../features/media/table_plugin.dart';
 import '../features/media/video_plugin.dart';
 import '../features/structure/structure_plugin.dart';
+import '../features/voice_input/voice_input_button.dart';
 import '../theme/editor_theme.dart';
 import 'dialogs/color_picker_popup.dart';
 import 'dialogs/image_dialog.dart';
@@ -391,6 +392,26 @@ class EditorToolbar extends StatelessWidget {
             tooltip: 'Source Editing (HTML)',
             isActive: (_) => isSourceMode,
             onTap: (_) => onToggleSourceMode?.call(),
+          ),
+
+        // AI Generate / Voice Input — auto-injected when voice/AI callbacks are set
+        if (config.hasVoiceInput)
+          ToolbarItem(
+            id: 'voice.input',
+            icon: Icons.auto_awesome,
+            label: 'Generate',
+            tooltip: 'Generate with AI (Voice or Text)',
+            customWidget: (BuildContext ctx, RichEditorController ctrl, EditorTheme th) =>
+                VoiceInputButton(
+              controller: ctrl,
+              theme: th,
+              insertMode: config.voiceInsertMode,
+              onRecord: config.onVoiceRecord,
+              onTranscribe: config.onVoiceTranscribe,
+              onVoiceInput: config.onVoiceInput,
+              onMicPressed: config.onMicPressed,
+              onError: config.onVoiceError,
+            ),
           ),
       ];
 

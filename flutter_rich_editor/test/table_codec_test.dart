@@ -65,4 +65,33 @@ void main() {
     final titleCell = docTitleFallback.nodes.first.children[2].children[0];
     expect(titleCell.metadata['data-formula'], '=SUM(A1+A2)');
   });
+
+  test('Table formula A1+A2 SUM with cell references in description roundtrip test', () {
+    const codec = HtmlDocumentCodec();
+    const html = '''
+<figure class="table"><table><tbody>
+<tr><td>34</td></tr>
+<tr><td>32</td></tr>
+<tr><td data-formula="=SUM(A1+A2)" data-formula-val="66" title="Formula: =SUM(A1+A2)" class="has-formula"><p><strong>66</strong></p></td></tr>
+</tbody></table></figure>
+<p>The values are <span class="mention table-cell-ref" data-mention="\$A1" data-cell-coord="A1">34</span> and <span class="mention table-cell-ref" data-mention="\$A2" data-cell-coord="A2">32</span>, sum is <span class="mention table-cell-ref" data-mention="\$A3" data-cell-coord="A3">66</span>.</p>
+''';
+    final doc = codec.decode(html);
+    final encoded = codec.encode(doc);
+
+    // Verify formula, formula-val, and cell references are fully preserved
+    expect(encoded.contains('data-formula="=SUM(A1+A2)"'), isTrue);
+    expect(encoded.contains('data-formula-val="66"'), isTrue);
+    expect(encoded.contains('data-cell-coord="A1"'), isTrue);
+    expect(encoded.contains('data-cell-coord="A2"'), isTrue);
+    expect(encoded.contains('data-cell-coord="A3"'), isTrue);
+  });
+
+  test('Table column widths (colgroup) survive a decode/encode round-trip', () {
+    const codec = HtmlDocumentCodec();
+    const inputHtml = '<figure class="table"><table class="ck-table-resized"><colgroup><col style="width:20%;"><col style="width:30%;"><col style="width:50%;"></colgroup><tbody><tr><td>A1</td><td>B1</td><td>C1</td></tr></tbody></table></figure>';
+    final encoded = codec.encode(codec.decode(inputHtml));
+    expect(encoded.contains('<colgroup><col style="width:20%;"><col style="width:30%;"><col style="width:50%;"></colgroup>'), isTrue);
+    expect(encoded.indexOf('<colgroup>') < encoded.indexOf('<tbody>'), isTrue);
+  });
 }
