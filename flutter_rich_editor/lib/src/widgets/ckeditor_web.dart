@@ -5362,9 +5362,10 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       if (!table) return 'tbl_0';
       let uid = (table.getAttribute && table.getAttribute('data-table-uid')) || table._tableUid;
       if (!uid) {
-        const liveTables = getEditorLiveTables();
-        const idx = Math.max(0, liveTables.indexOf(table));
-        uid = 'tbl_' + idx;
+        /* Unique per table, NOT positional: pasting/inserting a table shifts positions, which used to
+           make the formulas of one table land in another (and break formulas in pasted tables). */
+        window._tableUidSeq = (window._tableUidSeq || 0) + 1;
+        uid = 'tbl_u' + window._tableUidSeq;
       }
       table._tableUid = uid;
       if (table.setAttribute && !table.getAttribute('data-table-uid')) {
@@ -5514,10 +5515,8 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               if (!formula && regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) {
                 formula = window._tableFormulaRegistry[regKey];
               }
-              if (!formula && window._tableFormulaRegistry && window._tableFormulaRegistry[tIdx + '_' + r + '_' + c]) {
-                formula = window._tableFormulaRegistry[tIdx + '_' + r + '_' + c];
-                if (regKey) window._tableFormulaRegistry[regKey] = formula;
-              }
+              /* No positional (tIdx_r_c) fallback: inserting/pasting a table shifts positions and that
+                 copied one table's formulas into another. */
 
               // Strip accidental 'fx' suffix from cell text
               const walker = doc.createTreeWalker(cell, NodeFilter.SHOW_TEXT, null, false);
@@ -6559,8 +6558,6 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
               formula = normalizeFormulaString(cell.querySelector('[data-formula]').getAttribute('data-formula'));
             } else if (window._tableFormulaRegistry[regKey]) {
               formula = normalizeFormulaString(window._tableFormulaRegistry[regKey]);
-            } else if (window._tableFormulaRegistry[idxKey]) {
-              formula = normalizeFormulaString(window._tableFormulaRegistry[idxKey]);
             }
 
             const isFocused = cell.contains(document.activeElement);
@@ -6672,8 +6669,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       }
 
       // 3. Registry check (by tableUid key or by index key)
-      const regFormula = (regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey]) ||
-                         (window._tableFormulaRegistry && window._tableFormulaRegistry[idxKey]);
+      const regFormula = regKey && window._tableFormulaRegistry && window._tableFormulaRegistry[regKey];
       if (regFormula) {
         const nf = normalizeFormulaString(regFormula);
         if (cell.setAttribute) {
