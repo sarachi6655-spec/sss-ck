@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:ui_web' as ui_web;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
@@ -413,6 +415,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
 
   @override
   void dispose() {
+    _coverTimer?.cancel();
     if (_messageListener != null) {
       web.window.removeEventListener('message', _messageListener!);
     }
@@ -435,11 +438,48 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     if (blocked) iframe.blur();
   }
 
+  Timer? _coverTimer;
+
+  /// True when anything in the Flutter tree (any navigator/overlay) is drawn
+  /// above the editor. Detected by hit-testing the Flutter tree at several
+  /// points of the editor: if the editor's render box isn't reached, something
+  /// (modal barrier, dialog, menu, custom overlay) is on top of it.
+  bool _isCovered() {
+    if (!mounted) return false;
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return true;
+
+    final RenderObject? ro = context.findRenderObject();
+    if (ro is! RenderBox || !ro.attached || !ro.hasSize) return false;
+    final Size size = ro.size;
+    if (size.isEmpty) return false;
+    final int viewId = View.of(context).viewId;
+
+    const List<Offset> samples = <Offset>[
+      Offset(0.5, 0.5),
+      Offset(0.25, 0.25),
+      Offset(0.75, 0.25),
+      Offset(0.25, 0.75),
+      Offset(0.75, 0.75),
+    ];
+    for (final Offset f in samples) {
+      final Offset global = ro.localToGlobal(Offset(size.width * f.dx, size.height * f.dy));
+      final HitTestResult result = HitTestResult();
+      WidgetsBinding.instance.hitTestInView(result, global, viewId);
+      final bool reachesEditor = result.path.any((HitTestEntry e) => identical(e.target, ro));
+      if (!reachesEditor) return true;
+    }
+    return false;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _coverTimer ??= Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _setBlocked(_isCovered());
+    });
     final ModalRoute<dynamic>? route = ModalRoute.of(context);
-    _setBlocked(route != null && !route.isCurrent);
+    if (route != null && !route.isCurrent) _setBlocked(true);
   }
 
   @override
@@ -589,10 +629,27 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       width: 100% !important;
       max-width: 100% !important;
       margin: 14px 0 !important;
-      overflow-x: auto !important;
-      -webkit-overflow-scrolling: touch !important;
+      /* No scrollbars: the table is fixed-layout at 100% width and wraps text.
+         Visible overflow also stops the widget's "insert paragraph" (Enter)
+         buttons from being clipped at the table's corners. */
+      overflow: visible !important;
       box-sizing: border-box !important;
     }
+    /* Polished type-around ("Enter") buttons */
+    .ck-content .ck-widget .ck-widget__type-around__button {
+      width: 22px !important;
+      height: 22px !important;
+      border-radius: 50% !important;
+      background: #3b82f6 !important;
+      box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25) !important;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .ck-content .ck-widget:hover > .ck-widget__type-around > .ck-widget__type-around__button,
+    .ck-content .ck-widget.ck-widget_selected > .ck-widget__type-around > .ck-widget__type-around__button {
+      opacity: 1;
+    }
+    .ck-content .ck-widget .ck-widget__type-around__button svg { fill: #fff !important; }
     .ck-content figure.table table,
     .ck-content table,
     #fallback-content table {
@@ -1912,8 +1969,7 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       .ck-content .table {
         margin: 8px 0 !important;
         max-width: 100% !important;
-        overflow-x: auto !important;
-        -webkit-overflow-scrolling: touch !important;
+        overflow: visible !important;
         display: block !important;
       }
       .ck-content table,
