@@ -419,9 +419,41 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
     super.dispose();
   }
 
+  /// The iframe is a native DOM element that sits above Flutter's canvas, so it
+  /// swallows pointer events even when a Flutter popup (date/time picker,
+  /// dialog, dropdown, menu, bottom sheet) is drawn over it. Whenever another
+  /// route is pushed above the one hosting the editor we make the iframe
+  /// pointer-transparent and take keyboard focus away from it.
+  bool _blocked = false;
+
+  void _setBlocked(bool blocked) {
+    if (_blocked == blocked) return;
+    _blocked = blocked;
+    final web.HTMLIFrameElement? iframe = _iframe;
+    if (iframe == null) return;
+    iframe.style.pointerEvents = blocked ? 'none' : 'auto';
+    if (blocked) iframe.blur();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ModalRoute<dynamic>? route = ModalRoute.of(context);
+    _setBlocked(route != null && !route.isCurrent);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return HtmlElementView(viewType: _viewType);
+    return HtmlElementView(
+      viewType: _viewType,
+      onPlatformViewCreated: (_) => _applyBlockedState(),
+    );
+  }
+
+  void _applyBlockedState() {
+    final web.HTMLIFrameElement? iframe = _iframe;
+    if (iframe == null) return;
+    iframe.style.pointerEvents = _blocked ? 'none' : 'auto';
   }
 
   String _generateHtmlTemplate() {
@@ -9351,6 +9383,36 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
         return;
       }
     });
+
+    /* ====== ZOOM RESTRICTION (pinch, Ctrl+wheel, Ctrl +/-/0, double-tap) ====== */
+    (function lockZoom() {
+      const opts = { passive: false, capture: true };
+      // Trackpad pinch / Ctrl+scroll wheel
+      document.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) e.preventDefault();
+      }, opts);
+      // Keyboard zoom shortcuts
+      document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && ['+', '=', '-', '_', '0'].includes(e.key)) {
+          e.preventDefault();
+        }
+      }, true);
+      // iOS Safari ignores user-scalable=no; block its gesture events
+      ['gesturestart', 'gesturechange', 'gestureend'].forEach((t) => {
+        document.addEventListener(t, (e) => e.preventDefault(), opts);
+      });
+      // Multi-touch pinch on other mobile browsers
+      document.addEventListener('touchmove', (e) => {
+        if (e.touches && e.touches.length > 1) e.preventDefault();
+      }, opts);
+      // Double-tap zoom
+      let lastTouchEnd = 0;
+      document.addEventListener('touchend', (e) => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) e.preventDefault();
+        lastTouchEnd = now;
+      }, opts);
+    })();
 
     /* ====== SMART VIEWPORT CLAMPING FOR POPUPS & BALLOONS ====== */
     let _isClamping = false;
