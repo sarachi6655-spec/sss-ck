@@ -2127,10 +2127,68 @@ class _CKEditorWebViewState extends State<CKEditorWebView> {
       .ck-balloon-rotator,
       #toast-notification,
       .ck-editor__nested-editable_focused,
-      .ck-widget__resizer {
+      .ck-widget__resizer,
+      .ck-widget__type-around,
+      .ck-widget__selection-handle,
+      .ck-table-column-resizer,
+      .ck-table-bogus-paragraph + br,
+      .ck-placeholder::before {
         display: none !important;
         visibility: hidden !important;
       }
+
+      /* Strip editing chrome (selection outlines/focus rings) from the output */
+      .ck-widget,
+      .ck-widget.ck-widget_selected,
+      .ck-widget:hover,
+      .ck-editor__editable.ck-focused,
+      .ck-content .ck-editor__nested-editable,
+      .ck-content .ck-editor__nested-editable.ck-editor__nested-editable_focused {
+        outline: none !important;
+        box-shadow: none !important;
+      }
+      .ck-content .ck-widget { margin-left: 0 !important; margin-right: 0 !important; }
+
+      /* Tables: identical geometry to the editor, no clipping or scrollbars */
+      .ck-content figure.table {
+        display: block !important;
+        overflow: visible !important;
+        margin: 10px 0 !important;
+        padding: 0 !important;
+        outline: none !important;
+      }
+      .ck-content figure.table table,
+      .ck-content table {
+        table-layout: fixed !important;
+        width: 100% !important;
+        border-collapse: collapse !important;
+        margin: 0 !important;
+      }
+      .ck-content table th,
+      .ck-content table td {
+        border: 1px solid #000 !important;
+        padding: 6px 8px !important;
+        vertical-align: middle;
+        box-sizing: border-box !important;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+      }
+      .ck-content table th {
+        background: #f1f5f9;
+        font-weight: 700;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .ck-content table td p, .ck-content table th p { margin: 0 !important; }
+      .ck-content table thead { display: table-header-group; }
+      .ck-content table tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+      /* Preserve cell/background colours and keep paragraph rhythm consistent */
+      .ck-content * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
+      .ck-content p { orphans: 3; widows: 3; }
 
       /* Reset viewport/height and overflow locks so print layout engine can paginate naturally across multiple pages */
       html, body {
